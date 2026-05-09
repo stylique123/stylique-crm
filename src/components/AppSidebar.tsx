@@ -1,0 +1,132 @@
+/**
+ * STYLIQUE CRM — Sidebar Navigation
+ * Strict role-based nav. NO Directives anywhere.
+ */
+import {
+  LayoutDashboard, Users, Calendar,
+  GitBranch, KeyRound,
+  Building2, Settings as SettingsIcon,
+} from 'lucide-react';
+import { NavLink } from '@/components/NavLink';
+import { useUser } from '@/lib/user-context';
+import {
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
+} from '@/components/ui/sidebar';
+
+interface NavItem { title: string; url: string; icon: typeof GitBranch; }
+
+function getNavItems(role: string): { main: NavItem[]; more: NavItem[] } {
+  switch (role) {
+    case 'ceo':
+    case 'coo':
+      return {
+        main: [
+          { title: 'Command Center', url: '/dashboard', icon: LayoutDashboard },
+          { title: 'Clients', url: '/clients', icon: Building2 },
+          { title: 'Pipeline', url: '/pipeline', icon: GitBranch },
+          { title: 'Contacts', url: '/contacts', icon: Users },
+          { title: 'Calendar', url: '/calendar', icon: Calendar },
+        ],
+        more: [
+          { title: 'Settings', url: '/admin', icon: SettingsIcon },
+        ],
+      };
+    case 'onboarding':
+      // Onboarding workspace — client activation only.
+      return {
+        main: [
+          { title: 'Awaiting Credentials', url: '/clients#credentials', icon: KeyRound },
+          { title: 'Onboarding Queue', url: '/clients#queue', icon: Building2 },
+          { title: 'Active Clients', url: '/clients#active', icon: Building2 },
+          { title: 'Contacts', url: '/contacts', icon: Users },
+        ],
+        more: [],
+      };
+    case 'sdr':
+    default:
+      return {
+        main: [
+          { title: 'Command Center', url: '/dashboard', icon: LayoutDashboard },
+          { title: 'Pipeline', url: '/pipeline', icon: GitBranch },
+          { title: 'Clients', url: '/clients', icon: Building2 },
+          { title: 'Contacts', url: '/contacts', icon: Users },
+          { title: 'Calendar', url: '/calendar', icon: Calendar },
+        ],
+        more: [],
+      };
+  }
+}
+
+export function AppSidebar() {
+  const { state } = useSidebar();
+  const { role } = useUser();
+  const collapsed = state === 'collapsed';
+  const { main, more } = getNavItems(role);
+
+  return (
+    <Sidebar collapsible="icon">
+      <SidebarContent>
+        <div className={`px-4 py-4 ${collapsed ? 'px-2' : ''}`}>
+          {collapsed ? (
+            <span className="block text-center text-base font-semibold text-primary">S</span>
+          ) : (
+            <span className="text-lg font-semibold tracking-tight text-sidebar-accent-foreground">
+              Stylique <span className="text-primary/70 font-normal text-xs ml-1">CRM</span>
+            </span>
+          )}
+        </div>
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {main.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <NavLink
+                      to={item.url}
+                      end={item.url === '/pipeline'}
+                      className="hover:bg-sidebar-accent/50 transition-colors text-sidebar-foreground"
+                      activeClassName="bg-sidebar-accent text-primary font-medium"
+                    >
+                      <item.icon className="mr-2 h-4 w-4 shrink-0" />
+                      {!collapsed && <span className="text-[13px]">{item.title}</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {more.length > 0 && (
+          <SidebarGroup>
+            {!collapsed && (
+              <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/40 px-3 mb-1">
+                More
+              </SidebarGroupLabel>
+            )}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {more.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={item.url}
+                        className="hover:bg-sidebar-accent/50 transition-colors text-sidebar-foreground/60"
+                        activeClassName="bg-sidebar-accent text-primary font-medium"
+                      >
+                        <item.icon className="mr-2 h-3.5 w-3.5 shrink-0" />
+                        {!collapsed && <span className="text-[12px]">{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+      </SidebarContent>
+    </Sidebar>
+  );
+}

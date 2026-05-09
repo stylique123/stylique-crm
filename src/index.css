@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Stylique brand system, sampled from Brand Identity 5.
+       Near-black structure, warm ivory text, violet core, calibrated product accents. */
+    --background: 0 0% 10%;
+    --foreground: 37 55% 90%;
+
+    --card: 252 11% 14%;
+    --card-foreground: 37 55% 90%;
+
+    --popover: 252 12% 13%;
+    --popover-foreground: 37 55% 90%;
+
+    --primary: 260 69% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 252 9% 20%;
+    --secondary-foreground: 38 28% 82%;
+
+    --muted: 252 8% 24%;
+    --muted-foreground: 254 10% 66%;
+
+    --accent: 260 44% 22%;
+    --accent-foreground: 37 55% 90%;
+
+    --destructive: 350 86% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 252 8% 28%;
+    --input: 252 8% 22%;
+    --ring: 260 69% 55%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 254 10% 66%;
+    --sidebar-primary: 260 69% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 252 10% 16%;
+    --sidebar-accent-foreground: 37 55% 90%;
+    --sidebar-border: 252 8% 22%;
+    --sidebar-ring: 260 69% 55%;
+
+    --success: 82 58% 58%;
+    --success-foreground: 0 0% 100%;
+    --warning: 12 100% 71%;
+    --warning-foreground: 0 0% 8%;
+    --info: 350 86% 65%;
+    --info-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'DM Sans', system-ui, sans-serif;
+    font-size: 14px;
+    letter-spacing: 0;
+    font-feature-settings: "ss04" 1, "ss07" 1, "liga" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: 0;
+  }
+}
+
+@layer components {
+  .stylique-surface {
+    @apply border border-border/60 bg-card text-card-foreground;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+}
