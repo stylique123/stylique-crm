@@ -278,6 +278,10 @@ async function router(req, res) {
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
 
+  if (!pathname.startsWith('/api/') && !pathname.startsWith('/auth/') && pathname !== '/health') {
+    if (await serveStatic(req, res, pathname, corsHeaders)) return;
+  }
+
   if (pathname === '/health' && req.method === 'GET') {
     return send(res, 200, {
       ok: true,
@@ -337,8 +341,6 @@ async function router(req, res) {
     const result = await proxyConnector(key, await readBody(req), mode);
     return send(res, result.status, result.body, corsHeaders);
   }
-
-  if (await serveStatic(req, res, pathname, corsHeaders)) return;
 
   return send(res, 404, { ok: false, error: 'Not found' }, corsHeaders);
 }

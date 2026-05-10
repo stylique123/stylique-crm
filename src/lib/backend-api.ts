@@ -20,7 +20,7 @@ const TOKEN_KEY = 'stylique:apiToken';
 const TOKEN_EXP_KEY = 'stylique:apiTokenExpiresAt';
 
 export function getApiBaseUrl(): string {
-  return (import.meta.env.VITE_STYLIQUE_API_BASE_URL || '').replace(/\/+$/, '');
+  return (import.meta.env.VITE_STYLIQUE_API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/+$/, '');
 }
 
 export function getApiToken(): string {
