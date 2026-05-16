@@ -2,8 +2,8 @@ services:
   - type: web
     name: stylique-crm
     env: node
-    plan: starter
-    buildCommand: npm ci && npm run build
+    plan: free
+    buildCommand: unzip -o stylique-crm-deploy-ready.zip && npm ci && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /health
     disk:
@@ -21,3 +21,4 @@ services:
         value: /var/data
       - key: VITE_REQUIRE_BACKEND_AUTH
         value: true
+
