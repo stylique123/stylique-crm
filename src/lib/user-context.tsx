@@ -3,7 +3,7 @@
  * Global current-user state with role-aware helpers.
  */
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { TEAM_MEMBERS, isCeoOrCoo, isSDR } from '@/types/crm';
+import { TEAM_MEMBERS, isCeoOrCoo, isSDR, isViewAllMember } from '@/types/crm';
 import { getRoleForUser, type CRMRole } from '@/lib/role';
 
 interface UserContextValue {
@@ -74,9 +74,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
       currentUser,
       setCurrentUser,
       role,
-      isLeadership: isCeoOrCoo(currentUser),
+      isLeadership: isViewAllMember(currentUser),
       isOnboarding: currentUser === 'muneeb',
-      isSdr: isSDR(currentUser),
+      isSdr: isSDR(currentUser) && !isViewAllMember(currentUser),
       userName: member?.name?.split(' ')[0] || currentUser,
     }}>
       {children}

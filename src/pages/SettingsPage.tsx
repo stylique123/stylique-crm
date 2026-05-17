@@ -44,6 +44,7 @@ import { toast } from 'sonner';
 const ROLES: Array<{ id: string; label: string }> = [
   { id: 'ceo', label: 'CEO' },
   { id: 'coo', label: 'COO' },
+  { id: 'operations', label: 'Operations' },
   { id: 'sdr', label: 'SDR' },
   { id: 'onboarding', label: 'Onboarding' },
 ];
@@ -67,6 +68,7 @@ function generatePassword() {
 const DEFAULT_TITLE_BY_ROLE: Record<string, string> = {
   ceo: 'Chief Executive Officer',
   coo: 'Chief Operating Officer',
+  operations: 'Operations',
   sdr: 'Sales Development Representative',
   onboarding: 'Onboarding Specialist',
 };
@@ -103,7 +105,8 @@ function blankEmployee(): EmployeeProfile {
 export default function SettingsPage() {
   const empStore = useEmployees();
   const companyStore = useCompanyStore();
-  const { currentUser } = useUser();
+  const { currentUser, role } = useUser();
+  const canManageSettings = role === 'ceo' || role === 'coo';
   const [weekly, setWeekly] = useState<WeeklyKPIConfig>(getWeeklyKPIConfig);
   const [pricing, setPricing] = useState<PackagePriceTable>(getPackagePricing);
   const [packageLabels, setPackageLabels] = useState<PackageLabelTable>(getPackageLabels);
@@ -126,6 +129,7 @@ export default function SettingsPage() {
   }, []);
 
   const loadAuthUsers = async () => {
+    if (!canManageSettings) return;
     setAuthLoading(true);
     setAuthError('');
     try {
@@ -139,13 +143,13 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadAuthUsers();
-  }, []);
+  }, [canManageSettings]);
 
   const findAuthUser = (id: string) => authUsers.find(user => user.id === id);
 
   const sorted = [...empStore.employees].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
-    const order = ['ceo', 'coo', 'sdr', 'onboarding'];
+    const order = ['ceo', 'coo', 'operations', 'sdr', 'onboarding'];
     return order.indexOf(a.role) - order.indexOf(b.role) || a.fullName.localeCompare(b.fullName);
   });
 
@@ -233,6 +237,7 @@ export default function SettingsPage() {
   };
 
   const submitEdit = async () => {
+    if (!canManageSettings) { toast.error('Operations can view settings only'); return; }
     if (!editing) return;
     if (!editing.fullName.trim()) { toast.error('Name is required'); return; }
     const next = { ...editing };
@@ -277,6 +282,7 @@ export default function SettingsPage() {
   };
 
   const resetPassword = async (emp: EmployeeProfile, password: string) => {
+    if (!canManageSettings) { toast.error('Operations can view settings only'); return; }
     if (!password.trim()) {
       toast.error('Password cannot be empty');
       return;
@@ -341,9 +347,11 @@ export default function SettingsPage() {
           <Card>
             <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Team Roster</CardTitle>
-              <Button size="sm" className="h-7 text-xs" onClick={openAdd}>
-                <Plus className="h-3 w-3 mr-1" /> Add teammate
-              </Button>
+              {canManageSettings && (
+                <Button size="sm" className="h-7 text-xs" onClick={openAdd}>
+                  <Plus className="h-3 w-3 mr-1" /> Add teammate
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="px-0 pb-2">
               <div className="grid grid-cols-12 gap-2 px-4 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium border-b border-border/20">
@@ -379,12 +387,16 @@ export default function SettingsPage() {
                     {(emp.kpiAssignments?.length ?? 0) === 0 && <Badge variant="outline" className="text-[9px]">No-KPI</Badge>}
                   </div>
                   <div className="col-span-1 flex items-center justify-end gap-1">
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(emp)}>
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => toggleActive(emp)}>
-                      {emp.active ? <UserMinus className="h-3 w-3 text-destructive/80" /> : <UserCheck className="h-3 w-3 text-success" />}
-                    </Button>
+                    {canManageSettings && (
+                      <>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(emp)}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => toggleActive(emp)}>
+                          {emp.active ? <UserMinus className="h-3 w-3 text-destructive/80" /> : <UserCheck className="h-3 w-3 text-success" />}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -403,12 +415,17 @@ export default function SettingsPage() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-2">
-              {authError && (
+              {!canManageSettings && (
+                <div className="rounded-md border border-border/40 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Operations can view CRM state, but password management is CEO/COO only.
+                </div>
+              )}
+              {canManageSettings && authError && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   {authError}
                 </div>
               )}
-              {authError.toLowerCase().includes('unauthorized') && (
+              {canManageSettings && authError.toLowerCase().includes('unauthorized') && (
                 <div className="rounded-md border border-border/40 bg-muted/20 p-3 space-y-2">
                   <p className="text-[11px] text-muted-foreground">
                     Connect backend auth once before viewing or changing passwords.
@@ -428,10 +445,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
-              <p className="text-[11px] text-muted-foreground">
+              {canManageSettings && <p className="text-[11px] text-muted-foreground">
                 These are CRM login passwords. Adding a teammate should include a password here.
-              </p>
-              {sorted.map(emp => {
+              </p>}
+              {canManageSettings && sorted.map(emp => {
                 const auth = findAuthUser(emp.id);
                 const visible = !!passwordVisible[emp.id];
                 const value = auth?.password || '';
@@ -726,7 +743,7 @@ export default function SettingsPage() {
                     <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">No manager</SelectItem>
-                      {empStore.employees.filter(m => m.id !== editing.id && (m.role === 'ceo' || m.role === 'coo')).map(m => (
+                      {empStore.employees.filter(m => m.id !== editing.id && (m.role === 'ceo' || m.role === 'coo' || m.role === 'operations')).map(m => (
                         <SelectItem key={m.id} value={m.id}>{m.fullName}</SelectItem>
                       ))}
                     </SelectContent>

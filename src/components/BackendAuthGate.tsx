@@ -17,7 +17,11 @@ function getActiveLoginMembers() {
         const active = employees
           .filter(emp => emp.active !== false)
           .map(emp => ({ id: String(emp.id), name: String(emp.fullName || emp.name || emp.id) }));
-        if (active.length) return active;
+        const merged = [...active];
+        for (const member of TEAM_MEMBERS) {
+          if (!merged.some(emp => emp.id === member.id)) merged.push(member);
+        }
+        if (merged.length) return merged;
       }
     }
   } catch {

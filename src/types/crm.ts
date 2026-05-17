@@ -1030,6 +1030,7 @@ export type TeamMemberLite = { id: string; name: string; role: string; region: s
 const SEED_TEAM_MEMBERS: TeamMemberLite[] = [
   { id: 'abdullah', name: 'Abdullah - CEO', role: 'CEO', region: '' },
   { id: 'hira', name: 'Hira - COO', role: 'COO', region: '' },
+  { id: 'namra', name: 'Namra - Operations', role: 'Operations', region: '' },
   { id: 'muneeb', name: 'Muneeb', role: 'Onboarding', region: '' },
   { id: 'areeba', name: 'Areeba', role: 'SDR', region: 'USA' },
   { id: 'taiba', name: 'Taiba', role: 'SDR', region: 'UK' },
@@ -1073,6 +1074,7 @@ function normalizeRole(r: string): string {
   const lc = (r || '').toLowerCase();
   if (lc === 'ceo') return 'CEO';
   if (lc === 'coo') return 'COO';
+  if (lc === 'operations') return 'Operations';
   if (lc === 'onboarding') return 'Onboarding';
   return 'SDR';
 }
@@ -1186,6 +1188,11 @@ export function getContactFieldCount(lead: Partial<Lead>): number {
 export function isCeoOrCoo(memberId: string): boolean {
   const m = TEAM_MEMBERS.find(t => t.id === memberId);
   return m?.role === 'CEO' || m?.role === 'COO';
+}
+
+export function isViewAllMember(memberId: string): boolean {
+  const m = TEAM_MEMBERS.find(t => t.id === memberId);
+  return m?.role === 'CEO' || m?.role === 'COO' || m?.role === 'Operations';
 }
 
 export function isSDR(memberId: string): boolean {

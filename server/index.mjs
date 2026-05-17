@@ -202,6 +202,7 @@ async function upsertAuthUser(userId, role, password) {
 function canAccessBucket(user, bucket, method) {
   const role = String(user?.role || '');
   if (role === 'ceo' || role === 'coo') return true;
+  if (role === 'operations') return method === 'GET';
   if (role === 'sdr') return method === 'GET' && SDR_OWNED_BUCKETS.has(bucket);
   if (role === 'onboarding') return method === 'GET' && ONBOARDING_BUCKETS.has(bucket);
   return false;

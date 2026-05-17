@@ -2,7 +2,7 @@
  * STYLIQUE CRM — Role & Permission System
  */
 
-export type Role = 'sdr' | 'onboarding' | 'ceo' | 'coo';
+export type Role = 'sdr' | 'onboarding' | 'ceo' | 'coo' | 'operations';
 
 export type Permission =
   | 'lead:create' | 'lead:edit' | 'lead:delete'
@@ -41,6 +41,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'payment:record', 'settings:manage-team',
     'reports:view-all', 'credentials:add',
   ],
+  operations: [
+    'reports:view-all',
+  ],
 };
 
 export function canPerform(role: Role, permission: Permission): boolean {
@@ -61,6 +64,7 @@ export interface TeamMember {
 const SEED_TEAM: TeamMember[] = [
   { id: 'abdullah', name: 'Abdullah - CEO', role: 'ceo' },
   { id: 'hira', name: 'Hira - COO', role: 'coo' },
+  { id: 'namra', name: 'Namra - Operations', role: 'operations' },
   { id: 'muneeb', name: 'Muneeb', role: 'onboarding' },
   { id: 'areeba', name: 'Areeba', role: 'sdr', region: 'USA' },
   { id: 'taiba', name: 'Taiba', role: 'sdr', region: 'UK' },
@@ -91,7 +95,7 @@ function emitTeamChange(): void {
 
 function normalizeRoleLower(r: string): Role {
   const lc = (r || '').toLowerCase();
-  if (lc === 'ceo' || lc === 'coo' || lc === 'onboarding') return lc as Role;
+  if (lc === 'ceo' || lc === 'coo' || lc === 'onboarding' || lc === 'operations') return lc as Role;
   return 'sdr';
 }
 

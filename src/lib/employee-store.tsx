@@ -306,6 +306,20 @@ const DEFAULT_EMPLOYEES: EmployeeProfile[] = [
     updatedAt: new Date().toISOString(),
   },
   {
+    id: 'namra', fullName: 'Namra', role: 'operations', title: 'Operations',
+    email: '', phone: '', department: 'Operations', manager: 'hira',
+    active: true, employmentStatus: 'confirmed',
+    joiningDate: '2026-05-18',
+    baseSalary: 0, currency: 'PKR',
+    leavePolicyId: 'policy-confirmed',
+    commissionRuleIds: [], kpiAssignments: [],
+    annualLeaveAllowance: 14, leaveUsed: 0, leaveRemaining: 14,
+    inboundPermission: false, outboundPermission: false,
+    canImportLeads: false, canAddManualLeads: false, canSendDirectives: false, canApprove: false, dataVisibility: 'all',
+    attendanceExempt: true,
+    updatedAt: new Date().toISOString(),
+  },
+  {
     id: 'areeba', fullName: 'Areeba', role: 'sdr', region: 'USA', title: 'Sales Development Representative',
     email: '', phone: '', department: 'Sales', manager: 'hira',
     active: true, employmentStatus: 'confirmed',
@@ -511,7 +525,7 @@ const EmployeeContext = createContext<EmployeeContextValue | null>(null);
 
 const SALARY_DEFAULTS: Record<string, number> = {
   abdullah: 250000, hira: 200000, areeba: 55000, taiba: 55000,
-  khadija: 40000, mashael: 40000, muneeb: 50000,
+  khadija: 40000, mashael: 40000, muneeb: 50000, namra: 0,
 };
 
 function loadEmployees(): EmployeeProfile[] {
@@ -526,6 +540,12 @@ function loadEmployees(): EmployeeProfile[] {
       }
       return emp;
     });
+    for (const defaultEmp of DEFAULT_EMPLOYEES) {
+      if (!updated.some(emp => emp.id === defaultEmp.id)) {
+        migrated = true;
+        updated.push(defaultEmp);
+      }
+    }
     if (migrated) writeJSON(KEYS.employees, updated);
     const final = migrated ? updated : stored;
     setTeamMembersFromEmployees(final);

@@ -11,22 +11,28 @@
 
 import { TEAM_MEMBERS } from '@/types/crm';
 
-export type CRMRole = 'ceo' | 'coo' | 'sdr' | 'onboarding';
+export type CRMRole = 'ceo' | 'coo' | 'sdr' | 'onboarding' | 'operations';
 
 /** Map a userId to their canonical role. Defaults to 'sdr' if unknown. */
 export function getRoleForUser(userId: string): CRMRole {
   if (userId === 'abdullah') return 'ceo';
   if (userId === 'hira') return 'coo';
   if (userId === 'muneeb') return 'onboarding';
+  if (userId === 'namra') return 'operations';
   const member = TEAM_MEMBERS.find(m => m.id === userId);
   if (!member) return 'sdr';
   const r = (member.role || '').toLowerCase();
   if (r === 'ceo') return 'ceo';
   if (r === 'coo') return 'coo';
   if (r === 'onboarding') return 'onboarding';
+  if (r === 'operations') return 'operations';
   return 'sdr';
 }
 
 export function isLeadershipRole(role: CRMRole): boolean {
   return role === 'ceo' || role === 'coo';
+}
+
+export function isViewAllRole(role: CRMRole): boolean {
+  return role === 'ceo' || role === 'coo' || role === 'operations';
 }
