@@ -16,6 +16,13 @@ export interface ConnectorPingResult {
   message: string;
 }
 
+export interface AuthUserRecord {
+  id: string;
+  role: string;
+  password: string;
+  updatedAt?: string;
+}
+
 const TOKEN_KEY = 'stylique:apiToken';
 const TOKEN_EXP_KEY = 'stylique:apiTokenExpiresAt';
 
@@ -111,6 +118,27 @@ export async function loginToBackend(userId: string, password: string): Promise<
   });
   saveApiToken(result.token, result.expiresAt);
   return result;
+}
+
+export async function getAuthUsers(): Promise<AuthUserRecord[]> {
+  const result = await apiFetch<{ ok: true; users: AuthUserRecord[] }>('/api/auth-users');
+  return result.users || [];
+}
+
+export async function saveAuthUser(user: AuthUserRecord): Promise<AuthUserRecord> {
+  const result = await apiFetch<{ ok: true; user: AuthUserRecord }>('/api/auth-users', {
+    method: 'POST',
+    body: JSON.stringify({ userId: user.id, role: user.role, password: user.password }),
+  });
+  return result.user;
+}
+
+export async function saveAuthUsers(users: AuthUserRecord[]): Promise<AuthUserRecord[]> {
+  const result = await apiFetch<{ ok: true; users: AuthUserRecord[] }>('/api/auth-users', {
+    method: 'PUT',
+    body: JSON.stringify({ users }),
+  });
+  return result.users || [];
 }
 
 export async function pingConnector(key: ConnectorKey): Promise<ConnectorPingResult> {

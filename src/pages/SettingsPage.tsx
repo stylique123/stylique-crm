@@ -18,7 +18,8 @@ import {
   getConnectorReadiness, getConnectors, saveConnectors, type ConnectorConfig,
 } from '@/lib/connectors';
 import {
-  getApiBaseUrl, getBackendHealth, loginToBackend, pingConnector, type BackendHealth,
+  getApiBaseUrl, getAuthUsers, getBackendHealth, loginToBackend, pingConnector, saveAuthUser,
+  type AuthUserRecord, type BackendHealth,
 } from '@/lib/backend-api';
 import { useCompanyStore } from '@/lib/company-store';
 import { useUser } from '@/lib/user-context';
@@ -36,7 +37,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Shield, Plus, Pencil, UserMinus, UserCheck, Target, PlugZap } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, Shield, Plus, Pencil, UserMinus, UserCheck, Target, PlugZap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -55,6 +56,13 @@ const READINESS_LABEL = {
   missing_endpoint: 'Needs endpoint',
   missing_key: 'Needs key reference',
 } as const;
+
+function generatePassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint8Array(14);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => alphabet[byte % alphabet.length]).join('');
+}
 
 const DEFAULT_TITLE_BY_ROLE: Record<string, string> = {
   ceo: 'Chief Executive Officer',
@@ -101,6 +109,11 @@ export default function SettingsPage() {
   const [packageLabels, setPackageLabels] = useState<PackageLabelTable>(getPackageLabels);
   const [connectors, setConnectors] = useState<ConnectorConfig[]>(getConnectors);
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
+  const [authUsers, setAuthUsers] = useState<AuthUserRecord[]>([]);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState<Record<string, boolean>>({});
   const [apiPassword, setApiPassword] = useState('');
   const [connectorChecks, setConnectorChecks] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<EmployeeProfile | null>(null);
@@ -112,6 +125,24 @@ export default function SettingsPage() {
     getBackendHealth().then(setBackendHealth);
   }, []);
 
+  const loadAuthUsers = async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      setAuthUsers(await getAuthUsers());
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not load passwords');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAuthUsers();
+  }, []);
+
+  const findAuthUser = (id: string) => authUsers.find(user => user.id === id);
+
   const sorted = [...empStore.employees].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
     const order = ['ceo', 'coo', 'sdr', 'onboarding'];
@@ -121,11 +152,13 @@ export default function SettingsPage() {
   const openAdd = () => {
     setEditing(blankEmployee());
     setIsNew(true);
+    setPasswordDraft(generatePassword());
   };
 
   const openEdit = (e: EmployeeProfile) => {
     setEditing({ ...e });
     setIsNew(false);
+    setPasswordDraft(findAuthUser(e.id)?.password || '');
   };
 
   const toggleActive = (e: EmployeeProfile) => {
@@ -199,7 +232,7 @@ export default function SettingsPage() {
     setReassignTo('');
   };
 
-  const submitEdit = () => {
+  const submitEdit = async () => {
     if (!editing) return;
     if (!editing.fullName.trim()) { toast.error('Name is required'); return; }
     const next = { ...editing };
@@ -212,9 +245,57 @@ export default function SettingsPage() {
       }
       next.id = id;
     }
+    if (isNew && !passwordDraft.trim()) {
+      toast.error('Set a login password before adding teammate');
+      return;
+    }
     empStore.saveEmployee(next);
-    toast.success(isNew ? `${next.fullName} added` : `${next.fullName} updated`);
+    if (passwordDraft.trim()) {
+      try {
+        const saved = await saveAuthUser({
+          id: next.id,
+          role: next.role,
+          password: passwordDraft.trim(),
+        });
+        setAuthUsers(prev => {
+          const idx = prev.findIndex(user => user.id === saved.id);
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = saved;
+            return copy;
+          }
+          return [...prev, saved].sort((a, b) => a.id.localeCompare(b.id));
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Password was not saved');
+        return;
+      }
+    }
+    toast.success(isNew ? `${next.fullName} added with login` : `${next.fullName} updated`);
     setEditing(null);
+    setPasswordDraft('');
+  };
+
+  const resetPassword = async (emp: EmployeeProfile, password: string) => {
+    if (!password.trim()) {
+      toast.error('Password cannot be empty');
+      return;
+    }
+    try {
+      const saved = await saveAuthUser({ id: emp.id, role: emp.role, password: password.trim() });
+      setAuthUsers(prev => {
+        const idx = prev.findIndex(user => user.id === saved.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = saved;
+          return copy;
+        }
+        return [...prev, saved].sort((a, b) => a.id.localeCompare(b.id));
+      });
+      toast.success(`${emp.fullName} password updated`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Password update failed');
+    }
   };
 
   const loginApi = async () => {
@@ -248,6 +329,7 @@ export default function SettingsPage() {
       <Tabs defaultValue="team" className="space-y-4">
         <TabsList className="h-8 bg-transparent border-b border-border/30 rounded-none p-0 w-full justify-start gap-0">
           <TabsTrigger value="team" className="text-xs h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">Team</TabsTrigger>
+          <TabsTrigger value="passwords" className="text-xs h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">Passwords</TabsTrigger>
           <TabsTrigger value="packages" className="text-xs h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">Packages</TabsTrigger>
           <TabsTrigger value="connectors" className="text-xs h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">Connectors</TabsTrigger>
           <TabsTrigger value="kpi" className="text-xs h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">KPI policy</TabsTrigger>
@@ -305,6 +387,45 @@ export default function SettingsPage() {
                   </div>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="passwords">
+          <Card>
+            <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5" /> Login Passwords
+              </CardTitle>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={loadAuthUsers} disabled={authLoading}>
+                Refresh
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {authError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  {authError}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                These are CRM login passwords. Adding a teammate should include a password here.
+              </p>
+              {sorted.map(emp => {
+                const auth = findAuthUser(emp.id);
+                const visible = !!passwordVisible[emp.id];
+                const value = auth?.password || '';
+                return (
+                  <PasswordRow
+                    key={emp.id}
+                    employee={emp}
+                    password={value}
+                    visible={visible}
+                    onToggleVisible={() => setPasswordVisible(prev => ({ ...prev, [emp.id]: !visible }))}
+                    onSave={password => resetPassword(emp, password)}
+                    onGenerate={() => resetPassword(emp, generatePassword())}
+                  />
+                );
+              })}
             </CardContent>
           </Card>
         </TabsContent>
@@ -529,6 +650,36 @@ export default function SettingsPage() {
                 <Input value={editing.fullName} onChange={e => setEditing({ ...editing, fullName: e.target.value })} className="h-8 text-sm" />
               </Field>
 
+              <Field label={isNew ? 'Login password' : 'Change login password'}>
+                <div className="flex gap-2">
+                  <Input
+                    value={passwordDraft}
+                    type={passwordVisible.__editing ? 'text' : 'password'}
+                    onChange={e => setPasswordDraft(e.target.value)}
+                    placeholder={isNew ? 'Required for login' : 'Leave blank to keep current password'}
+                    className="h-8 text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2"
+                    onClick={() => setPasswordVisible(prev => ({ ...prev, __editing: !prev.__editing }))}
+                  >
+                    {passwordVisible.__editing ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setPasswordDraft(generatePassword())}
+                  >
+                    Generate
+                  </Button>
+                </div>
+              </Field>
+
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Role">
                   <Select
@@ -694,6 +845,57 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
     <div className="flex items-center gap-1.5">
       <Switch checked={checked} onCheckedChange={onChange} className="scale-75" />
       <Label className="text-[11px] text-muted-foreground">{label}</Label>
+    </div>
+  );
+}
+
+function PasswordRow({
+  employee,
+  password,
+  visible,
+  onToggleVisible,
+  onSave,
+  onGenerate,
+}: {
+  employee: EmployeeProfile;
+  password: string;
+  visible: boolean;
+  onToggleVisible: () => void;
+  onSave: (password: string) => void;
+  onGenerate: () => void;
+}) {
+  const [draft, setDraft] = useState(password);
+
+  useEffect(() => {
+    setDraft(password);
+  }, [password]);
+
+  return (
+    <div className="grid grid-cols-12 gap-2 items-center rounded-md border border-border/35 bg-card px-3 py-2">
+      <div className="col-span-3 min-w-0">
+        <div className="text-xs font-medium truncate">{employee.fullName}</div>
+        <div className="text-[10px] text-muted-foreground truncate">{employee.id} · {employee.role}</div>
+      </div>
+      <div className="col-span-5">
+        <Input
+          value={draft}
+          type={visible ? 'text' : 'password'}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="No password allocated"
+          className="h-8 text-xs font-mono"
+        />
+      </div>
+      <div className="col-span-4 flex items-center justify-end gap-1">
+        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onToggleVisible}>
+          {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onGenerate}>
+          Generate
+        </Button>
+        <Button type="button" size="sm" className="h-8 text-xs" onClick={() => onSave(draft)}>
+          Save
+        </Button>
+      </div>
     </div>
   );
 }

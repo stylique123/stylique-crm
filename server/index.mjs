@@ -61,6 +61,7 @@ const STATE_BUCKETS = new Set([
   'kpi-definitions',
   'leave-requests',
   'package-pricing',
+  'auth-users',
 ]);
 
 const SDR_OWNED_BUCKETS = new Set(['leads', 'activities', 'attendance', 'kpi-actions', 'leave-requests']);
@@ -135,13 +136,67 @@ function sameSecret(a, b) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-function getUsers() {
-  if (!process.env.STYLIQUE_USERS_JSON) return {};
-  try {
-    return JSON.parse(process.env.STYLIQUE_USERS_JSON);
-  } catch {
-    return {};
+async function getUsers() {
+  let envUsers = {};
+  if (process.env.STYLIQUE_USERS_JSON) {
+    try {
+      envUsers = JSON.parse(process.env.STYLIQUE_USERS_JSON);
+    } catch {
+      envUsers = {};
+    }
   }
+  const stored = await readBucket('auth-users');
+  if (!Array.isArray(stored) || stored.length === 0) return envUsers;
+  const storedUsers = Object.fromEntries(stored
+    .filter(user => user?.id && user?.password)
+    .map(user => [String(user.id), {
+      password: String(user.password),
+      role: String(user.role || envUsers[String(user.id)]?.role || 'user'),
+    }])
+  );
+  return { ...envUsers, ...storedUsers };
+}
+
+async function listAuthUsers() {
+  const users = await getUsers();
+  return Object.entries(users).map(([id, user]) => ({
+    id,
+    role: String(user.role || 'user'),
+    password: String(user.password || ''),
+  })).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function saveAuthUsers(users) {
+  const normalized = Array.isArray(users)
+    ? users
+        .filter(user => user?.id && user?.password)
+        .map(user => ({
+          id: String(user.id).trim(),
+          role: String(user.role || 'user').trim(),
+          password: String(user.password),
+          updatedAt: new Date().toISOString(),
+        }))
+    : [];
+  await writeBucket('auth-users', normalized);
+  return normalized;
+}
+
+async function upsertAuthUser(userId, role, password) {
+  if (!userId || !password) {
+    return { status: 400, body: { ok: false, error: 'userId and password are required' } };
+  }
+  const current = await listAuthUsers();
+  const id = String(userId).trim();
+  const idx = current.findIndex(user => user.id === id);
+  const next = {
+    id,
+    role: String(role || current[idx]?.role || 'user').trim(),
+    password: String(password),
+    updatedAt: new Date().toISOString(),
+  };
+  if (idx >= 0) current[idx] = next; else current.push(next);
+  await saveAuthUsers(current);
+  return { status: 200, body: { ok: true, user: next } };
 }
 
 function canAccessBucket(user, bucket, method) {
@@ -562,7 +617,7 @@ async function router(req, res) {
     if (!JWT_SECRET || !ADMIN_PASSWORD) {
       return send(res, 503, { ok: false, error: 'Auth is not configured on the backend' }, corsHeaders);
     }
-    const users = getUsers();
+    const users = await getUsers();
     const user = users[String(body.userId)] || { password: ADMIN_PASSWORD, role: String(body.role || 'user') };
     if (!body.userId || !sameSecret(body.password, user.password)) {
       return send(res, 401, { ok: false, error: 'Invalid credentials' }, corsHeaders);
@@ -577,6 +632,31 @@ async function router(req, res) {
 
   if (pathname === '/auth/me' && req.method === 'GET') {
     return send(res, 200, { ok: true, user }, corsHeaders);
+  }
+
+  if (pathname === '/api/auth-users' && req.method === 'GET') {
+    if (!['ceo', 'coo'].includes(String(user.role || ''))) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
+    return send(res, 200, { ok: true, users: await listAuthUsers() }, corsHeaders);
+  }
+
+  if (pathname === '/api/auth-users' && req.method === 'PUT') {
+    if (!['ceo', 'coo'].includes(String(user.role || ''))) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
+    const body = await readBody(req);
+    const saved = await saveAuthUsers(body.users || body.data || []);
+    return send(res, 200, { ok: true, users: saved }, corsHeaders);
+  }
+
+  if (pathname === '/api/auth-users' && req.method === 'POST') {
+    if (!['ceo', 'coo'].includes(String(user.role || ''))) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
+    const body = await readBody(req);
+    const result = await upsertAuthUser(body.userId || body.id, body.role, body.password);
+    return send(res, result.status, result.body, corsHeaders);
   }
 
   const stateMatch = pathname.match(/^\/api\/state\/([a-z0-9-]+)$/);
