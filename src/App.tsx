@@ -44,10 +44,10 @@ function PageShell({ children }: { children: ReactNode }) {
 initLifecycleAutomation();
 
 // Preview/QA bootstrap.
-// 1. ?reset=1  → wipe ALL persisted CRM state, then re-seed cleanly.
-// 2. Version-guarded auto-seed → seeds exactly once per SEED_VERSION,
-//    avoiding partial / mixed-state re-seeding on subsequent loads.
-const SEED_VERSION = 'v5';
+// 1. ?reset=1  → wipe persisted browser CRM state and keep the app empty.
+// 2. ?demo=1   → explicitly load demo data for QA/demo review.
+// Production never auto-seeds because real CRM users need a clean workspace.
+const SEED_VERSION = 'v6-clean-production';
 const SEED_VERSION_KEY = 'stylique:seedVersion';
 try {
   if (typeof window !== 'undefined') {
@@ -61,15 +61,17 @@ try {
       const url = new URL(window.location.href);
       url.searchParams.delete('reset');
       window.history.replaceState({}, '', url.toString());
+      window.localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
     }
+    const shouldLoadDemo = params.get('demo') === '1';
     const seededVersion = window.localStorage.getItem(SEED_VERSION_KEY);
     const noLeads = getLeads().length === 0;
-    if (noLeads && seededVersion !== SEED_VERSION) {
+    if (shouldLoadDemo && noLeads) {
       seedSampleData();
       window.localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
     } else if (noLeads) {
-      // Empty store but already marked seeded → user explicitly cleared leads;
-      // do not silently re-seed.
+      // Empty store is now the production default. Do not silently re-seed.
+      window.localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
     } else if (seededVersion !== SEED_VERSION) {
       // Existing data from a prior version — mark current version without
       // re-seeding to avoid duplicates.
