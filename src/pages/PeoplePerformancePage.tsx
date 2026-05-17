@@ -189,13 +189,14 @@ function OverviewTab({ onOpenProfile }: { onOpenProfile: (id: string) => void })
   const empStore = useEmployees();
   const kpiDefs = useKPIDefinitions();
 
-  const sdrs = TEAM.filter(m => m.role === 'sdr' || m.role === 'onboarding');
+  const attendanceTeam = TEAM.filter(m => m.role === 'sdr' || m.role === 'onboarding');
+  const sdrs = TEAM.filter(m => m.role === 'sdr');
   const today = todayKey();
 
   // Manager stats
   const stats = useMemo(() => {
     let present = 0, late = 0, onLeave = 0, absent = 0, notCheckedIn = 0;
-    for (const m of sdrs) {
+    for (const m of attendanceTeam) {
       const emp = empStore.getEmployee(m.id);
       const entry = attendance.getForDate(m.id, today);
       const approvedLeave = leave.getForDate(m.id, today);
@@ -218,22 +219,21 @@ function OverviewTab({ onOpenProfile }: { onOpenProfile: (id: string) => void })
       else if (ds.state === 'not_checked_in') notCheckedIn++;
     }
     return { present, late, onLeave, absent, notCheckedIn };
-  }, [attendance, leave, empStore, sdrs, today]);
+  }, [attendance, leave, empStore, attendanceTeam, today]);
 
   const kpiStats = useMemo(() => {
-    const sdrOnly = sdrs.filter(m => m.role === 'sdr');
     const brandsKPI = kpiDefs.getActive('sdr').find(k => k.code === MANDATORY_KPI_CODE);
-    const totalBrands = sdrOnly.reduce((s, m) => s + getWeeklySnapshot(m.id).brandsReached, 0);
+    const totalBrands = sdrs.reduce((s, m) => s + getWeeklySnapshot(m.id).brandsReached, 0);
     // Canonical: derive weekly target from the brands-per-working-day setting.
     // No hardcoded fallback — it must always trace back to settings.
     const cfg = getWeeklyKPIConfig();
     const weekTarget = brandsKPI ? brandsKPI.targetValue : cfg.brandsPerWorkingDay * 5;
-    const atRisk = sdrOnly.filter(m => {
+    const atRisk = sdrs.filter(m => {
       const snap = getWeeklySnapshot(m.id);
       const target = brandsKPI ? getEffectiveTarget(brandsKPI, m.id) : weekTarget;
       return target > 0 && (snap.brandsReached / target) < 0.5;
     }).length;
-    const onTrack = sdrOnly.filter(m => {
+    const onTrack = sdrs.filter(m => {
       const snap = getWeeklySnapshot(m.id);
       const target = brandsKPI ? getEffectiveTarget(brandsKPI, m.id) : weekTarget;
       return target > 0 && (snap.brandsReached / target) >= 0.7;
@@ -482,7 +482,7 @@ function OverviewTab({ onOpenProfile }: { onOpenProfile: (id: string) => void })
           <div>
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5"><Users className="h-3 w-3" /> Team Status</h3>
             <div className="space-y-1.5">
-              {sdrs.map(member => {
+              {attendanceTeam.map(member => {
                 const entry = attendance.getForDate(member.id, today);
                 const emp = empStore.getEmployee(member.id);
                 const approvedLeave = leave.getForDate(member.id, today);
@@ -496,11 +496,14 @@ function OverviewTab({ onOpenProfile }: { onOpenProfile: (id: string) => void })
                   attendanceExempt: emp?.attendanceExempt, isProbationary: emp?.employmentStatus === 'probationary',
                   isToday: true,
                 });
-                const weekLeaveDates = leave.requests.filter(r => r.userId === member.id && r.status === 'approved').map(r => r.startDate);
-                const wb = computeWeeklyBrandKPI(member.id, weekLeaveDates);
+                const isSdrMember = member.role === 'sdr';
+                const weekLeaveDates = isSdrMember
+                  ? leave.requests.filter(r => r.userId === member.id && r.status === 'approved').map(r => r.startDate)
+                  : [];
+                const wb = isSdrMember ? computeWeeklyBrandKPI(member.id, weekLeaveDates) : null;
 
                 return (
-                  <Card key={member.id} className={cn('cursor-pointer hover:border-primary/30 transition-colors', (wb.pacingStatus === 'behind' || wb.pacingStatus === 'at_risk' || wb.pacingStatus === 'missed') && 'border-amber-500/20')} onClick={() => onOpenProfile(member.id)}>
+                  <Card key={member.id} className={cn('cursor-pointer hover:border-primary/30 transition-colors', wb && (wb.pacingStatus === 'behind' || wb.pacingStatus === 'at_risk' || wb.pacingStatus === 'missed') && 'border-amber-500/20')} onClick={() => onOpenProfile(member.id)}>
                     <CardContent className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary shrink-0">{member.name.charAt(0)}</div>
@@ -510,15 +513,23 @@ function OverviewTab({ onOpenProfile }: { onOpenProfile: (id: string) => void })
                             <Badge className={cn('text-[9px] border', ds.color)}>{ds.label}</Badge>
                             {ds.lateByLabel && <span className="text-[9px] text-amber-500">Late {ds.lateByLabel}</span>}
                           </div>
-                          <div className="mt-1.5 max-w-[180px]">
-                            <div className="flex items-center justify-between text-[10px] mb-0.5">
-                              <span className="text-muted-foreground">Weekly brands</span>
-                              <span className="font-medium tabular-nums">{wb.brandsCompleted}/{wb.weeklyTarget}</span>
+                          {wb ? (
+                            <div className="mt-1.5 max-w-[180px]">
+                              <div className="flex items-center justify-between text-[10px] mb-0.5">
+                                <span className="text-muted-foreground">Weekly brands</span>
+                                <span className="font-medium tabular-nums">{wb.brandsCompleted}/{wb.weeklyTarget}</span>
+                              </div>
+                              <Progress value={wb.weeklyTarget > 0 ? Math.min(100, Math.round((wb.brandsCompleted / wb.weeklyTarget) * 100)) : 0} className="h-1" />
                             </div>
-                            <Progress value={wb.weeklyTarget > 0 ? Math.min(100, Math.round((wb.brandsCompleted / wb.weeklyTarget) * 100)) : 0} className="h-1" />
-                          </div>
+                          ) : (
+                            <p className="mt-1 text-[10px] text-muted-foreground">Onboarding role · no SDR KPI</p>
+                          )}
                         </div>
-                        <Badge className={cn('text-[9px] shrink-0', getLeadershipPacingColor(wb.pacingStatus))}>{getLeadershipPacingLabel(wb.pacingStatus)}</Badge>
+                        {wb ? (
+                          <Badge className={cn('text-[9px] shrink-0', getLeadershipPacingColor(wb.pacingStatus))}>{getLeadershipPacingLabel(wb.pacingStatus)}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[9px] shrink-0">Onboarding</Badge>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -675,7 +686,7 @@ function AttendanceTab() {
 // ═══════════════════════════════════════════════════════════
 
 function KPITab() {
-  const { currentUser, isLeadership } = useUser();
+  const { currentUser, isLeadership, isSdr, isOnboarding } = useUser();
   const kpiDefs = useKPIDefinitions();
   const leave = useLeave();
   const [showSettings, setShowSettings] = useState(false);
@@ -699,7 +710,7 @@ function KPITab() {
     };
   }, [kpiDefs]);
 
-  const sdrs = useMemo(() => isLeadership ? TEAM.filter(m => m.role === 'sdr') : TEAM.filter(m => m.id === currentUser), [isLeadership, currentUser]);
+  const sdrs = useMemo(() => isLeadership ? TEAM.filter(m => m.role === 'sdr') : isSdr ? TEAM.filter(m => m.id === currentUser && m.role === 'sdr') : [], [isLeadership, isSdr, currentUser]);
   const [selectedSdr, setSelectedSdr] = useState(sdrs[0]?.id || currentUser);
 
   const weekLeaveDates = useMemo(() => 
@@ -717,6 +728,19 @@ function KPITab() {
     const metricKey = code as keyof typeof weeklySnap.actions;
     return weeklySnap.actions[metricKey] ?? 0;
   };
+
+  if (!isLeadership && !isSdr) {
+    return (
+      <Card>
+        <CardContent className="py-4 px-4">
+          <h3 className="text-sm font-medium">{isOnboarding ? 'Onboarding work' : 'KPI'}</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            SDR KPI is only for SDRs. Your work is tracked through onboarding tasks, attendance, and leave.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-4">
