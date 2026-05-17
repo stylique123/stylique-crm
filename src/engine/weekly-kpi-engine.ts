@@ -47,15 +47,31 @@ export function saveWeeklyKPIConfig(config: WeeklyKPIConfig) {
   // or per-SDR KPI cards.
   try {
     const KPI_KEY = 'stylique-kpi-definitions';
-    const stored = localStorage.getItem(KPI_KEY);
-    if (stored) {
-      const defs = JSON.parse(stored) as Array<{ code: string; targetValue: number; updatedAt: string }>;
-      const idx = defs.findIndex(d => d.code === 'brands_reached_out');
+    const now = new Date().toISOString();
+    const stored = safeRead<Array<{ code: string; targetValue: number; period?: string; updatedAt: string }> | null>(KPI_KEY, null);
+    const defs = stored || [
+      { code: 'brands_reached_out', targetValue: 125, period: 'weekly', updatedAt: now },
+      { code: 'meetings_booked', targetValue: 10, period: 'monthly', updatedAt: now },
+      { code: 'conversions', targetValue: 2, period: 'monthly', updatedAt: now },
+    ];
+    const brandIdx = defs.findIndex(d => d.code === 'brands_reached_out');
+    if (brandIdx >= 0) {
+      defs[brandIdx].targetValue = Math.max(0, Math.round(config.brandsPerWorkingDay * 5));
+      defs[brandIdx].period = 'weekly';
+      defs[brandIdx].updatedAt = now;
+    }
+    for (const code of ['meetings_booked', 'conversions']) {
+      const idx = defs.findIndex(d => d.code === code);
       if (idx >= 0) {
-        defs[idx].targetValue = Math.max(0, Math.round(config.brandsPerWorkingDay * 5));
-        defs[idx].updatedAt = new Date().toISOString();
-        safeWrite(KPI_KEY, defs);
+        defs[idx].period = 'monthly';
+        defs[idx].updatedAt = now;
       }
+    }
+    safeWrite(KPI_KEY, defs);
+    const targets = safeRead<Record<string, unknown>>('stylique-kpi-targets', {});
+    safeWrite('stylique-kpi-targets', { ...targets, brandsPerDay: config.brandsPerWorkingDay });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('stylique:kpi-policy-updated'));
     }
   } catch (error) {
     console.warn('[WeeklyKPI] Could not sync weekly target to KPI definitions', error);

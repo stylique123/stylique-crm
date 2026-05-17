@@ -30,6 +30,14 @@ export function getCurrentWeekEnd(now: Date = new Date()): Date {
   return end;
 }
 
+export function getCurrentMonthStart(now: Date = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+export function getCurrentMonthEnd(now: Date = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth() + 1, 1);
+}
+
 function inWindow(iso: string | undefined, start: Date, end: Date): boolean {
   if (!iso) return false;
   const t = new Date(iso).getTime();
@@ -47,6 +55,25 @@ export function countMeetingsBookedThisWeek(
 ): number {
   const start = getCurrentWeekStart(now);
   const end = getCurrentWeekEnd(now);
+  let count = 0;
+  for (const lead of leads) {
+    const isOwner = lead.assignedTo === ownerId || lead.assigned_sdr === ownerId;
+    if (!isOwner) continue;
+    for (const m of lead.meetings || []) {
+      if (m.owner && m.owner !== ownerId) continue;
+      if (inWindow(m.created_at, start, end)) count++;
+    }
+  }
+  return count;
+}
+
+export function countMeetingsBookedThisMonth(
+  leads: Lead[],
+  ownerId: string,
+  now: Date = new Date(),
+): number {
+  const start = getCurrentMonthStart(now);
+  const end = getCurrentMonthEnd(now);
   let count = 0;
   for (const lead of leads) {
     const isOwner = lead.assignedTo === ownerId || lead.assigned_sdr === ownerId;
@@ -86,6 +113,32 @@ export function countConversionsThisWeek(
     const key = a.leadId;
     if (seen.has(key)) continue;
     seen.add(key);
+    count++;
+  }
+  return count;
+}
+
+export function countConversionsThisMonth(
+  leads: Lead[],
+  activities: Activity[],
+  ownerId: string,
+  now: Date = new Date(),
+): number {
+  const start = getCurrentMonthStart(now);
+  const end = getCurrentMonthEnd(now);
+  const ownedLeadIds = new Set(
+    leads
+      .filter(l => l.assignedTo === ownerId || l.assigned_sdr === ownerId)
+      .map(l => l.id),
+  );
+  let count = 0;
+  const seen = new Set<string>();
+  for (const a of activities) {
+    if (!ownedLeadIds.has(a.leadId)) continue;
+    if (a.type !== 'conversion' && a.type !== 'payment_confirmed') continue;
+    if (!inWindow(a.createdAt, start, end)) continue;
+    if (seen.has(a.leadId)) continue;
+    seen.add(a.leadId);
     count++;
   }
   return count;

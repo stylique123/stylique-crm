@@ -104,10 +104,10 @@ function buildSummary(view: CanonicalLeadView): string {
   const { bucket, lead, trialDaysLeft, billing } = view;
   if (billing === 'overdue') return `Payment overdue — ${lead.companyName}`;
   if (billing === 'awaiting_confirmation') return `Payment proof submitted — confirm`;
-  if (billing === 'awaiting_payment') return `Awaiting payment from ${lead.contactName}`;
-  if (bucket === 'trial_active' && trialDaysLeft !== null) return `Onboarding active — ${trialDaysLeft}d left`;
-  if (bucket === 'trial_ending_soon' && trialDaysLeft !== null) return `Decision due in ${trialDaysLeft}d`;
-  if (bucket === 'trial_ended_awaiting') return `Decision pending`;
+  if (billing === 'awaiting_payment') return `Client review`;
+  if (bucket === 'trial_active' && trialDaysLeft !== null) return `Pilot active — ${trialDaysLeft}d left`;
+  if (bucket === 'trial_ending_soon' && trialDaysLeft !== null) return `Pilot decision due in ${trialDaysLeft}d`;
+  if (bucket === 'trial_ended_awaiting') return `Pilot decision pending`;
   if (bucket === 'trial_pending_approval') return `Client Review`;
   if (bucket === 'trial_ready_to_start_blocked') return `Credentials missing`;
   if (bucket === 'trial_ready_to_start') return `Onboarding queue`;
@@ -116,8 +116,8 @@ function buildSummary(view: CanonicalLeadView): string {
 
 function buildReason(view: CanonicalLeadView): string {
   if (view.permissions.canConfirmPayment) return 'Payment proof submitted — leadership confirmation required';
-  if (view.permissions.canApproveTrial) return 'Approval required';
-  if (view.permissions.canActivateTrial) return 'Approved + credentials ready';
+  if (view.permissions.canApproveTrial) return 'Review required';
+  if (view.permissions.canActivateTrial) return 'Ready for pilot';
   if (view.onboardingBlocker?.kind === 'awaiting_credentials') return 'Credentials missing';
   if (view.onboardingBlocker?.kind === 'awaiting_approval') return 'Awaiting leadership approval';
   if (view.onboardingBlocker?.kind === 'awaiting_sdr_handoff') return 'Decision pending';

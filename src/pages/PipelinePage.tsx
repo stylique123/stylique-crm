@@ -62,6 +62,7 @@ import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { createMicrosoftTeamsEvent } from '@/services/calendar-service';
 import {
   User, ArrowRight, Clock, Inbox, Target, GitBranch, Plus,
   Globe, MapPin, GripVertical, ChevronRight, Upload,
@@ -74,6 +75,7 @@ type InboundSubFilter = 'all' | 'website_demo' | 'manual_inbound';
 
 const PIPELINE_VIEWS: { key: PipelineView; label: string; icon: typeof GitBranch }[] = [
   { key: 'sdr_flow', label: 'SDR Flow', icon: Target },
+  { key: 'inbound', label: 'Inbound', icon: Inbox },
 ];
 
 const SDR_SUB_FILTERS: { key: SdrSubFilter; label: string }[] = [
@@ -108,20 +110,22 @@ const SDR_COLUMNS: ColumnDef[] = [
   { key: 'meeting_completed', label: 'Meeting Done', description: 'Meeting result missing' },
   { key: 'decision_pending', label: 'Decision Pending', description: 'Awaiting decision' },
   { key: 'client_review', label: 'Moved to Client Review', description: 'Leadership owns this' },
+  { key: 'pilot', label: 'Pilot', description: 'Paid pilot' },
   { key: 'cold', label: 'Cold', description: 'Recoverable' },
   { key: 'closed', label: 'Closed Lost', description: 'Final SDR loss' },
 ];
 
 const INBOUND_COLUMNS: ColumnDef[] = [
   { key: 'new_inquiry', label: 'New Inquiry', description: 'Inbound lead received' },
-  { key: 'qualified', label: 'Qualified', description: 'Qualified for follow-up' },
-  { key: 'awaiting_sdr', label: 'Awaiting Follow-Up', description: 'Needs human follow-up' },
-  { key: 'meeting_booked', label: 'Meeting Booked', description: 'Demo or call scheduled' },
-  { key: 'meeting_completed', label: 'Meeting Outcome Due', description: 'Add outcome to proceed' },
-  { key: 'trial_proposed', label: 'Trial Proposed', description: 'Pending setup' },
-  { key: 'trial_active', label: 'Trial Active', description: 'Trial running' },
-  { key: 'converted', label: 'Active Client', description: 'Paying client' },
-  { key: 'closed', label: 'Closed', description: 'Not a fit or lost' },
+  { key: 'contacted', label: 'Contacted', description: 'No response yet' },
+  { key: 'replied', label: 'Replied', description: 'Conversation exists' },
+  { key: 'meeting_booked', label: 'Meeting Scheduled', description: 'Meeting booked' },
+  { key: 'meeting_completed', label: 'Meeting Done', description: 'Meeting result missing' },
+  { key: 'decision_pending', label: 'Decision Pending', description: 'Awaiting decision' },
+  { key: 'client_review', label: 'Moved to Client Review', description: 'Leadership owns this' },
+  { key: 'pilot', label: 'Pilot', description: 'Paid pilot' },
+  { key: 'cold', label: 'Cold', description: 'Recoverable' },
+  { key: 'closed', label: 'Closed Lost', description: 'Final SDR loss' },
 ];
 
 const FLOW_ICONS: Record<string, typeof Target> = {
@@ -137,16 +141,17 @@ const INBOUND_TYPE_LABELS: Record<string, string> = {
 function getColumnKey(cs: CanonicalState, lead: Lead, view: PipelineView): string {
   if (view === 'inbound') {
     if (cs.inbound_stage === 'new_inquiry') return 'new_inquiry';
-    if (cs.inbound_stage === 'qualified') return 'qualified';
-    if (cs.inbound_stage === 'awaiting_sdr') return 'awaiting_sdr';
+    if (cs.inbound_stage === 'qualified' || cs.inbound_stage === 'awaiting_sdr') return 'contacted';
     if (cs.inbound_stage === 'meeting_booked') return 'meeting_booked';
     if (cs.inbound_stage === 'disqualified') return 'closed';
     if (cs.inbound_stage === 'handed_to_sales') {
       // Map to commercial stage
+      if (cs.lifecycle_stage === 'replied') return 'replied';
       if (cs.lifecycle_stage === 'meeting_completed') return 'meeting_completed';
-      if (cs.lifecycle_stage === 'trial_proposed' || cs.lifecycle_stage === 'trial_ready') return 'trial_proposed';
-      if (cs.lifecycle_stage === 'trial_active') return 'trial_active';
-      if (cs.lifecycle_stage === 'converted' || cs.lifecycle_stage === 'conversion_pending') return 'converted';
+      if (cs.lifecycle_stage === 'internal_decision' || cs.lifecycle_stage === 'pricing_discussion') return 'decision_pending';
+      if (cs.lifecycle_stage === 'trial_active') return 'pilot';
+      if (cs.lifecycle_stage === 'trial_proposed' || cs.lifecycle_stage === 'trial_ready' || cs.lifecycle_stage === 'conversion_pending') return 'client_review';
+      if (cs.lifecycle_stage === 'converted') return 'client_review';
       return 'meeting_completed';
     }
     return 'new_inquiry';
@@ -159,7 +164,8 @@ function getColumnKey(cs: CanonicalState, lead: Lead, view: PipelineView): strin
   // Closed Lost (folds in unsubscribed / lost / disqualified).
   if (stage === 'unsubscribed' || stage === 'lost' || stage === 'closed') return 'closed';
   // Moved to Client Review — leadership-owned handoff stage.
-  if (stage === 'trial_proposed' || stage === 'trial_ready' || stage === 'trial_active') return 'client_review';
+  if (stage === 'trial_active') return 'pilot';
+  if (stage === 'trial_proposed' || stage === 'trial_ready') return 'client_review';
   // Decision Pending — post-meeting follow-up still owned by SDR.
   if (stage === 'internal_decision' || stage === 'pricing_discussion') return 'decision_pending';
   if (stage === 'meeting_completed') return 'meeting_completed';
@@ -179,6 +185,7 @@ function getCardReminder(lead: Lead, cs: CanonicalState, view: PipelineView): st
   if (col === 'meeting_completed') return 'Meeting result missing';
   if (col === 'decision_pending') return 'Awaiting decision';
   if (col === 'client_review') return 'Leadership owns this';
+  if (col === 'pilot') return lead.nextAction || 'Pilot active';
   if (col === 'cold') return 'Cold';
   if (col === 'closed') return 'Closed lost';
   return cs.next_action_label || '';
@@ -441,8 +448,8 @@ export default function PipelinePage() {
     const COLUMN_TO_STAGE: Record<string, string> = {
       new_lead: 'sdr-new-lead', contacted: 'sdr-contacted', replied: 'sdr-replied',
       meeting_booked: 'meeting-booked', meeting_completed: 'meeting-completed',
-      internal_decision: 'internal-decision', pricing_discussion: 'pricing-discussion',
-      trial_proposed: 'trial-proposed', client_review: 'trial-proposed', trial_active: 'trial-active',
+      decision_pending: 'internal-decision', internal_decision: 'internal-decision', pricing_discussion: 'pricing-discussion',
+      trial_proposed: 'trial-proposed', client_review: 'trial-proposed', trial_active: 'trial-active', pilot: 'trial-active',
       converted: 'converted', closed: 'closed-lost', cold: 'cold-no-response',
       new_inquiry: 'inbound-new', qualified: 'inbound-qualified', awaiting_sdr: 'inbound-awaiting-sdr',
     };
@@ -499,6 +506,15 @@ export default function PipelinePage() {
       return;
     }
 
+    // Decision Pending → one note, SDR still owns it.
+    if (targetColumnKey === 'decision_pending') {
+      setTransitionLead(lead);
+      setTransitionTargetStage(newStage);
+      setTransitionType('to_internal_decision');
+      setTransitionOpen(true);
+      return;
+    }
+
     // Closed/Lost → reason
     if (targetColumnKey === 'closed') {
       setTransitionLead(lead);
@@ -508,12 +524,8 @@ export default function PipelinePage() {
       return;
     }
 
-    // Trial Active → guard
-    if (targetColumnKey === 'trial_active' && isTrialProposedStage(lead.stage)) {
-      if (!lead.approvedBy) {
-        toast.error('Needs leadership approval');
-        return;
-      }
+    if (targetColumnKey === 'pilot') {
+      toast.info('Pilot starts after onboarding verifies');
       setSelectedLead(lead);
       return;
     }
@@ -691,11 +703,34 @@ export default function PipelinePage() {
     toast.success(`Meeting result added: ${freshLead.companyName}`, { description: result.nextStepDescription });
   };
 
-  const handleMeetingBookingConfirm = (booking: MeetingBooking) => {
+  const handleMeetingBookingConfirm = async (booking: MeetingBooking) => {
     if (!meetingBookingLead) return;
     // CRITICAL: Use fresh lead from store
     const freshLead = companies.find(c => c.id === meetingBookingLead.id) || meetingBookingLead;
-    const result = executeMeetingBooked(freshLead, currentUser, bridge, booking.dateTime, booking.type, booking.link);
+    let meetingLink = booking.link;
+    let calendarEventId = '';
+    if (booking.type === 'teams' && !meetingLink) {
+      try {
+        const event = await createMicrosoftTeamsEvent({
+          subject: `Stylique meeting: ${freshLead.companyName}`,
+          startTime: booking.dateTime,
+          attendees: freshLead.contactEmail ? [{ email: freshLead.contactEmail, name: freshLead.contactName }] : [],
+          notes: booking.notes || `Meeting with ${freshLead.companyName}`,
+        });
+        meetingLink = event.joinUrl || event.webLink || '';
+        calendarEventId = event.eventId;
+      } catch (error) {
+        toast.warning(error instanceof Error ? error.message : 'Microsoft calendar not configured. Save a manual link.');
+      }
+    }
+    const result = executeMeetingBooked(freshLead, currentUser, bridge, booking.dateTime, booking.type, meetingLink);
+    if (calendarEventId && result.lead?.meetings?.length) {
+      const updatedMeetings = result.lead.meetings.map((meeting, idx, arr) => idx === arr.length - 1
+        ? { ...meeting, external_calendar_id: calendarEventId, sync_status: 'synced' as const, meeting_link: meetingLink }
+        : meeting
+      );
+      saveCompany({ ...result.lead, meetings: updatedMeetings, updatedAt: new Date().toISOString() });
+    }
     refresh();
     setMeetingBookingOpen(false);
     setMeetingBookingLead(null);
@@ -831,8 +866,8 @@ export default function PipelinePage() {
     const COLUMN_TO_STAGE: Record<string, string> = {
       new_lead: 'sdr-new-lead', contacted: 'sdr-contacted', replied: 'sdr-replied',
       meeting_booked: 'meeting-booked', meeting_completed: 'meeting-completed',
-      internal_decision: 'internal-decision', pricing_discussion: 'pricing-discussion',
-      trial_proposed: 'trial-proposed', client_review: 'trial-proposed', trial_active: 'trial-active',
+      decision_pending: 'internal-decision', internal_decision: 'internal-decision', pricing_discussion: 'pricing-discussion',
+      trial_proposed: 'trial-proposed', client_review: 'trial-proposed', trial_active: 'trial-active', pilot: 'trial-active',
       converted: 'converted', closed: 'closed-lost', cold: 'cold-no-response',
       new_inquiry: 'inbound-new', qualified: 'inbound-qualified', awaiting_sdr: 'inbound-awaiting-sdr',
     };
@@ -892,6 +927,15 @@ export default function PipelinePage() {
       return;
     }
 
+    // → Decision Pending: small outcome note
+    if (targetColumnKey === 'decision_pending') {
+      setTransitionLead(lead);
+      setTransitionTargetStage(newStage);
+      setTransitionType('to_internal_decision');
+      setTransitionOpen(true);
+      return;
+    }
+
     // → Closed / Lost: Force close reason
     if (targetColumnKey === 'closed') {
       setTransitionLead(lead);
@@ -901,13 +945,8 @@ export default function PipelinePage() {
       return;
     }
 
-    // → Trial Active: Prevent unless approved + has credentials
-    if (targetColumnKey === 'trial_active' && isTrialProposedStage(lead.stage)) {
-      if (!lead.approvedBy) {
-        toast.error('Trial needs CEO/COO approval first');
-        return;
-      }
-      toast.info('Use the trial activation flow to properly activate');
+    if (targetColumnKey === 'pilot') {
+      toast.info('Pilot starts after onboarding verifies');
       setSelectedLead(lead);
       return;
     }

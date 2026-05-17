@@ -25,6 +25,7 @@ import {
   SALES_MEMBERS, DEFAULT_STAGE, recalculateNextAction,
 } from '@/types/crm';
 import { uid } from '@/lib/store';
+import { submitBookDemoLead } from '@/lib/backend-api';
 import { generateLeadKey } from '@/lib/lead-key';
 import { toast } from 'sonner';
 
@@ -66,19 +67,40 @@ interface CSVImportDialogProps {
 }
 
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return { headers: [], rows: [] };
-  
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-  const rows = lines.slice(1).map(line => {
-    const values = line.match(/("([^"]*(?:""[^"]*)*)"|[^,]*)/g) || [];
+  const table: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === '"' && quoted && next === '"') {
+      cell += '"';
+      i++;
+    } else if (ch === '"') {
+      quoted = !quoted;
+    } else if (ch === ',' && !quoted) {
+      row.push(cell.trim());
+      cell = '';
+    } else if ((ch === '\n' || ch === '\r') && !quoted) {
+      if (ch === '\r' && next === '\n') i++;
+      row.push(cell.trim());
+      if (row.some(v => v.length > 0)) table.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(v => v.length > 0)) table.push(row);
+  if (table.length < 2) return { headers: [], rows: [] };
+  const headers = table[0].map(h => h.trim().replace(/^"|"$/g, ''));
+  const rows = table.slice(1).map(values => {
     const obj: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      obj[h] = (values[i] || '').trim().replace(/^"|"$/g, '').replace(/""/g, '"');
-    });
+    headers.forEach((h, i) => { obj[h] = (values[i] || '').trim(); });
     return obj;
   });
-  
   return { headers, rows };
 }
 
@@ -157,6 +179,12 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   const [defaultPlatform, setDefaultPlatform] = useState<Platform>('shopify');
 
   const [demoWebhookUrl, setDemoWebhookUrl] = useState('');
+  const [demoCompany, setDemoCompany] = useState('');
+  const [demoContact, setDemoContact] = useState('');
+  const [demoEmail, setDemoEmail] = useState('');
+  const [demoPhone, setDemoPhone] = useState('');
+  const [demoWebsite, setDemoWebsite] = useState('');
+  const [demoNote, setDemoNote] = useState('');
 
   const entryFlow: EntryFlow = defaultFlow || 'sdr_manual';
   const pipeline: Pipeline = entryFlow === 'inbound' ? 'inbound' : 'outbound-sdr';
@@ -333,6 +361,9 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       const stage = DEFAULT_STAGE[pipeline];
       const primaryContactId = uid();
       const source = normalizeSource(m.source, sourceTag);
+      const inboundType = pipeline === 'inbound'
+        ? (source === 'website_demo' || source === 'website_form' ? 'direct_book_demo' : 'manual_inbound')
+        : null;
       const lead: Lead = {
         id: uid(),
         companyName: m.companyName.trim(),
@@ -357,6 +388,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         assignedTo: m.owner || defaultOwner,
         platform: (m.platform as Platform) || defaultPlatform,
         entry_flow: entryFlow,
+        inbound_type: inboundType,
         source_detail: source,
         action_owner: 'sdr',
         record_owner: m.owner || defaultOwner,
@@ -365,13 +397,13 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
           m.notes || '',
           m.country || m.city ? `Location: ${[m.city, m.country].filter(Boolean).join(', ')}` : '',
           m.tags ? `Tags: ${m.tags}` : '',
-          'Reminder: add secondary contact',
+          'Secondary contact missing',
         ].filter(Boolean).join('\n'),
         createdAt: now,
         updatedAt: now,
         tasks: [{
           id: uid(),
-          title: 'Add secondary contact',
+          title: 'Secondary contact missing',
           dueDate: now,
           completed: false,
           assignedTo: m.owner || defaultOwner,
@@ -410,6 +442,118 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   const dupeCount = parsedRows.filter(r => r.isDuplicate).length;
   const validCount = parsedRows.filter(r => r.mapped.companyName && r.mapped.contactName && r.mapped.contactEmail).length;
   const hasRequiredFields = !!(fieldMapping && Object.values(fieldMapping).includes('companyName') && Object.values(fieldMapping).includes('contactName') && Object.values(fieldMapping).includes('contactEmail'));
+
+  const createDemoLead = async () => {
+    if (!demoCompany.trim() || !demoContact.trim() || !demoEmail.trim()) {
+      toast.error('Company, contact, and email are required');
+      return;
+    }
+    const now = new Date().toISOString();
+    const existing = companies.find(c => normalizeBrandName(c.companyName) === normalizeBrandName(demoCompany));
+    if (existing) {
+      const baseContacts: BrandContact[] = existing.contacts?.length ? existing.contacts : [{
+        id: uid(),
+        name: existing.contactName,
+        role: existing.contactRole,
+        email: existing.contactEmail,
+        phone: existing.contactPhone,
+        linkedin: existing.linkedin,
+        instagram: existing.instagram,
+        reached: false,
+      }];
+      const contact: BrandContact = {
+        id: uid(),
+        name: demoContact.trim(),
+        email: demoEmail.trim(),
+        phone: demoPhone.trim() || undefined,
+        reached: false,
+      };
+      const contacts = contactAlreadyExists(baseContacts, contact.email, contact.name) ? baseContacts : [...baseContacts, contact];
+      saveCompany({
+        ...existing,
+        contacts,
+        secondaryContact: existing.secondaryContact || contacts[1] ? {
+          name: contacts[1]?.name || existing.secondaryContact?.name || '',
+          email: contacts[1]?.email || existing.secondaryContact?.email,
+          phone: contacts[1]?.phone || existing.secondaryContact?.phone,
+        } : existing.secondaryContact,
+        source_detail: 'website_demo',
+        inbound_type: 'direct_book_demo',
+        notes: [existing.notes, demoNote ? `[Book demo] ${demoNote}` : 'Book demo request'].filter(Boolean).join('\n'),
+        updatedAt: now,
+      });
+      addActivity({ id: uid(), leadId: existing.id, type: 'stage-change', description: 'Book-a-demo contact merged into brand', createdAt: now, createdBy: currentUser });
+      toast.success('Book-a-demo merged into existing brand');
+    } else {
+      const lead: Lead = {
+        id: uid(),
+        companyName: demoCompany.trim(),
+        contactName: demoContact.trim(),
+        contactEmail: demoEmail.trim(),
+        contactPhone: demoPhone.trim() || undefined,
+        website: demoWebsite.trim() || undefined,
+        contacts: [{ id: uid(), name: demoContact.trim(), email: demoEmail.trim(), phone: demoPhone.trim() || undefined, reached: false }],
+        contactsReachedCount: 0,
+        pipeline: 'inbound',
+        stage: DEFAULT_STAGE.inbound,
+        assignedTo: defaultOwner,
+        platform: defaultPlatform,
+        entry_flow: 'inbound',
+        inbound_type: 'direct_book_demo',
+        source_detail: 'website_demo',
+        action_owner: 'sdr',
+        record_owner: defaultOwner,
+        assigned_sdr: defaultOwner,
+        notes: [demoNote.trim(), 'Secondary contact missing'].filter(Boolean).join('\n'),
+        createdAt: now,
+        updatedAt: now,
+        tasks: [{
+          id: uid(),
+          title: 'Secondary contact missing',
+          dueDate: now,
+          completed: false,
+          assignedTo: defaultOwner,
+          type: 'outreach',
+          autoGenerated: true,
+          createdAt: now,
+          priority: 'medium',
+          reason: 'Book-a-demo brand has one contact',
+          stageFamily: 'sdr',
+        }],
+        priority: 'medium',
+      };
+      lead.leadKey = generateLeadKey(lead);
+      const intel = recalculateNextAction(lead);
+      lead.nextAction = intel.action;
+      lead.nextActionReason = intel.reason;
+      lead.nextActionUrgency = intel.urgency;
+      lead.nextFollowUp = intel.followUpDate;
+      saveCompany(lead);
+      addActivity({ id: uid(), leadId: lead.id, type: 'stage-change', description: `Book-a-demo inbound created — ${lead.companyName}`, createdAt: now, createdBy: currentUser });
+      try {
+        await submitBookDemoLead({
+          companyName: lead.companyName,
+          contactName: lead.contactName,
+          contactEmail: lead.contactEmail,
+          contactPhone: lead.contactPhone,
+          website: lead.website,
+          owner: defaultOwner,
+          note: demoNote,
+        });
+      } catch {
+        // Local creation is authoritative for offline preview; backend sync can be configured later.
+      }
+      toast.success('Book-a-demo lead added to Inbound');
+    }
+    setDemoCompany('');
+    setDemoContact('');
+    setDemoEmail('');
+    setDemoPhone('');
+    setDemoWebsite('');
+    setDemoNote('');
+    refresh();
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
@@ -464,6 +608,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                       <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="manual_import">Manual Import</SelectItem>
+                        <SelectItem value="website_demo">Website Demo</SelectItem>
                         <SelectItem value="linkedin_evaboot">LinkedIn</SelectItem>
                         <SelectItem value="instagram">Instagram</SelectItem>
                         <SelectItem value="google_search">Google Search</SelectItem>
@@ -666,6 +811,15 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                   </p>
                 </div>
 
+                <div className="grid grid-cols-2 gap-2">
+                  <Input placeholder="Brand / company" value={demoCompany} onChange={e => setDemoCompany(e.target.value)} className="h-8 text-xs" />
+                  <Input placeholder="Contact name" value={demoContact} onChange={e => setDemoContact(e.target.value)} className="h-8 text-xs" />
+                  <Input placeholder="Email" value={demoEmail} onChange={e => setDemoEmail(e.target.value)} className="h-8 text-xs" />
+                  <Input placeholder="Phone" value={demoPhone} onChange={e => setDemoPhone(e.target.value)} className="h-8 text-xs" />
+                  <Input placeholder="Website" value={demoWebsite} onChange={e => setDemoWebsite(e.target.value)} className="h-8 text-xs col-span-2" />
+                  <Input placeholder="Note" value={demoNote} onChange={e => setDemoNote(e.target.value)} className="h-8 text-xs col-span-2" />
+                </div>
+
                 <div className="bg-secondary/50 rounded-lg p-3 space-y-2">
                   <p className="text-[11px] font-medium">Import rules</p>
                   <ol className="text-[10px] text-muted-foreground space-y-1 list-decimal pl-4">
@@ -697,8 +851,8 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                   </div>
                 </div>
 
-                <Button size="sm" className="w-full" onClick={() => toast.success('Demo source noted. Add live credentials in Settings → Connectors.')}>
-                  <Globe className="h-3 w-3 mr-1" /> Save source note
+                <Button size="sm" className="w-full" onClick={createDemoLead}>
+                  <Globe className="h-3 w-3 mr-1" /> Create inbound lead
                 </Button>
               </CardContent>
             </Card>

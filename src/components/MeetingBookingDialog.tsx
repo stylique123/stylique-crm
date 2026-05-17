@@ -44,7 +44,7 @@ export function MeetingBookingDialog({ open, onOpenChange, companyName, onConfir
 
   const handleConfirm = () => {
     if (submitting) return;
-    if (!link.trim()) { setError('Meeting link is required'); return; }
+    if (!link.trim() && type !== 'teams') { setError('Meeting link is required'); return; }
     if (!dateTime) { setError('Pick a date and time'); return; }
     setError('');
     setSubmitting(true);
@@ -80,7 +80,12 @@ export function MeetingBookingDialog({ open, onOpenChange, companyName, onConfir
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground/50">Meeting link</Label>
-            <Input value={link} onChange={e => setLink(e.target.value)} placeholder="https://zoom.us/j/..." className="h-9" />
+            <Input
+              value={link}
+              onChange={e => setLink(e.target.value)}
+              placeholder={type === 'teams' ? 'Auto-created if Microsoft is configured' : 'https://zoom.us/j/...'}
+              className="h-9"
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground/50">Date & time</Label>

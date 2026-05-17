@@ -5,7 +5,7 @@
  * actively in the *billing* lifecycle.
  *
  * Tabs:
- *   • Awaiting Payment — billable, no payment confirmed yet
+ *   • Client Review    — approved billable records needing payment verification
  *   • Due Soon         — paid client whose next renewal is within 7 days
  *   • Overdue          — past due date with no payment
  *
@@ -21,16 +21,16 @@ import {
 } from '@/types/crm';
 import { getBillingState, BILLING_LABEL } from '@/engine/billing-state';
 import { getCommercialState } from '@/engine/commercial-state';
-import { getCurrentBillingEntry, paidThisMonth } from '@/engine/payment-ledger';
+import { getCurrentBillingEntry } from '@/engine/payment-ledger';
 import { processPaymentOutcome } from '@/engine/outcome-engine';
-import { PaymentOutcomeDialog, type PaymentOutcome } from '@/components/PaymentOutcomeDialog';
+import { PaymentOutcomeDialog, type PaymentConfirmationDetails, type PaymentOutcome } from '@/components/PaymentOutcomeDialog';
 import { CompanyDetailSheet } from '@/components/CompanyDetailSheet';
 import { CredentialsDialog } from '@/components/CredentialsDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { CreditCard, Clock, AlertTriangle, DollarSign } from 'lucide-react';
+import { CreditCard, Clock, AlertTriangle } from 'lucide-react';
 import { hasValidCredentials } from '@/types/crm';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -81,13 +81,12 @@ export default function PaymentsPage() {
     const g: Record<Tab, Lead[]> = { awaiting: [], due_soon: [], overdue: [] };
     for (const lead of leads) {
       const cs = getCommercialState(lead);
-      const s = getBillingState(lead);
-      if (cs === 'overdue' || s === 'overdue') {
+      if (cs === 'overdue') {
         g.overdue.push(lead);
       } else if (cs === 'payment_due_soon') {
         g.due_soon.push(lead);
-      } else if (s === 'awaiting_payment' || s === 'awaiting_confirmation') {
-        g.awaiting.push(lead);
+    } else if (cs === 'client_review') {
+      g.awaiting.push(lead);
       }
       // Paid + on-track clients live on /clients — intentionally not duplicated here.
     }
@@ -106,7 +105,6 @@ export default function PaymentsPage() {
       awaiting: sum(grouped.awaiting),
       dueSoon: sum(grouped.due_soon),
       overdue: sum(grouped.overdue),
-      paidThisMonth: paidThisMonth(leads),
     };
   }, [grouped, leads]);
 
@@ -122,14 +120,14 @@ export default function PaymentsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-5 pb-10">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Approvals</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Payments</h1>
         <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-          Client Review, payment, and renewal state.
+          Payment state only.
         </p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        <MetricTile icon={DollarSign} value={`$${Math.round(totals.paidThisMonth).toLocaleString()}`} label="Paid This Month" tone="success" />
+        <MetricTile icon={CreditCard} value={String(counts.awaiting)} label="Client Review" tone={counts.awaiting > 0 ? 'warning' : 'neutral'} />
         <MetricTile
           icon={Clock}
           value={totals.dueSoon > 0 ? `$${totals.dueSoon.toLocaleString()}` : '$0'}
@@ -146,7 +144,7 @@ export default function PaymentsPage() {
 
       <Tabs defaultValue={defaultTab} className="space-y-3">
         <TabsList className="h-8 flex-wrap">
-          <TabsTrigger value="awaiting" className="text-xs h-7">Awaiting Payment ({counts.awaiting})</TabsTrigger>
+          <TabsTrigger value="awaiting" className="text-xs h-7">Client Review ({counts.awaiting})</TabsTrigger>
           <TabsTrigger value="due_soon" className="text-xs h-7">Due Soon ({counts.due_soon})</TabsTrigger>
           <TabsTrigger value="overdue" className="text-xs h-7">Overdue ({counts.overdue})</TabsTrigger>
         </TabsList>
@@ -173,15 +171,32 @@ export default function PaymentsPage() {
           open={paymentOpen}
           onOpenChange={o => { if (!o) { setPaymentOpen(false); setPaymentLead(null); } }}
           companyName={paymentLead.companyName}
-          onSubmit={(outcome: PaymentOutcome, notes: string) => {
+          onSubmit={(outcome: PaymentOutcome, notes: string, details?: PaymentConfirmationDetails) => {
             const fresh = leads.find(l => l.id === paymentLead.id) || paymentLead;
-            processPaymentOutcome(fresh, outcome, notes, currentUser, bridge);
+            const leadForPayment = outcome === 'paid' && details ? {
+              ...fresh,
+              proposed_package: details.package,
+              proposed_currency: details.currency,
+              proposed_value: details.amount,
+              subscriptionPlan: details.package,
+              nextPaymentDate: new Date(details.paymentDate).toISOString(),
+            } : fresh;
+            const detailNotes = details
+              ? [
+                notes,
+                `Payment date: ${details.paymentDate}`,
+                `Package: ${PLAN_LABELS[details.package]}`,
+                `Amount: ${formatMoney(details.amount, details.currency)}`,
+                details.note ? `Note: ${details.note}` : '',
+              ].filter(Boolean).join('\n')
+              : notes;
+            processPaymentOutcome(leadForPayment, outcome, detailNotes, currentUser, bridge, details?.paymentDate);
             setPaymentOpen(false);
             const wasPaid = outcome === 'paid';
-            const target = paymentLead;
+            const target = leadForPayment;
             setPaymentLead(null);
             refresh();
-            toast.success(`Payment confirmed for ${target.companyName}`);
+            toast.success(wasPaid ? `Payment confirmed for ${target.companyName}` : `Payment updated for ${target.companyName}`);
             // Gate onboarding: prompt credentials immediately if missing.
             if (wasPaid && !hasValidCredentials(target)) {
               setTimeout(() => setCredLead(target), 250);
@@ -308,7 +323,7 @@ function PaymentRow({ lead, tab, onSelect, onConfirm }: {
 }
 
 function MetricTile({ icon: Icon, value, label, tone }: {
-  icon: typeof DollarSign; value: string; label: string;
+  icon: typeof CreditCard; value: string; label: string;
   tone: 'success' | 'danger' | 'warning' | 'neutral';
 }) {
   const valueColor = tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-destructive' : tone === 'warning' ? 'text-warning' : 'text-foreground';

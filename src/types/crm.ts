@@ -316,6 +316,19 @@ export interface Lead {
   trialStartDate?: string;
   trialEndDate?: string;
   trialManualOverride?: boolean;
+  /** Pilot naming for the current business flow. Kept alongside legacy trial fields for migration compatibility. */
+  pilotStartDate?: string;
+  pilotEndDate?: string;
+  pilotDecisionAt?: string;
+  pilotDecisionBy?: string;
+  pilotDecision?: 'contract' | 'lost';
+  clientReviewApprovedAt?: string;
+  clientReviewApprovedBy?: string;
+  paymentVerifiedAt?: string;
+  paymentVerifiedBy?: string;
+  contractSignedAt?: string;
+  contractStartDate?: string;
+  contractEndDate?: string;
   subscriptionPlan?: SubscriptionPlan;
   subscriptionStatus?: SubscriptionStatus;
   subscriptionStartDate?: string;
@@ -535,9 +548,9 @@ export const STAGE_LABELS: Record<string, string> = {
   'internal-decision': 'Decision Pending',
   'pricing-discussion': 'Decision Pending',
   'trial-proposed': 'Moved to Client Review',
-  'trial-active': 'Moved to Client Review',
-  'payment-pending': 'Awaiting Payment',
-  'converted': 'Active Client',
+  'trial-active': 'Pilot',
+  'payment-pending': 'Client Review',
+  'converted': 'Contract',
   'closed-lost': 'Closed Lost',
   'unsubscribed': 'Closed Lost',
   'cold-no-response': 'Cold',
@@ -562,9 +575,9 @@ export const STAGE_GUIDANCE: Record<string, { meaning: string; nextStep: string 
   'internal-decision': { meaning: 'Client is deciding', nextStep: 'Awaiting decision' },
   'pricing-discussion': { meaning: 'Commercial discussion active', nextStep: 'Awaiting decision' },
   'trial-proposed': { meaning: 'Leadership review', nextStep: 'Client Review' },
-  'trial-active': { meaning: 'Awaiting payment', nextStep: 'Awaiting payment' },
-  'payment-pending': { meaning: 'Awaiting payment', nextStep: 'Confirm payment' },
-  'converted': { meaning: 'Active client', nextStep: 'Renewal continuity' },
+  'trial-active': { meaning: 'Paid pilot', nextStep: 'Pilot decision' },
+  'payment-pending': { meaning: 'Client review', nextStep: 'Verify payment and credentials' },
+  'converted': { meaning: 'Contract client', nextStep: 'Renewal continuity' },
   'closed-lost': { meaning: 'Closed lost', nextStep: 'Keep history' },
   'unsubscribed': { meaning: 'Contact unsubscribed', nextStep: 'Do not contact' },
   'cold-no-response': { meaning: 'Inactive but recoverable', nextStep: 'Cold' },
@@ -589,9 +602,9 @@ export const STAGE_DEFAULT_ACTIONS: Record<string, string> = {
   'internal-decision': 'Follow up on internal review',
   'pricing-discussion': 'Awaiting decision',
   'trial-proposed': 'Client Review',
-  'trial-active': 'Awaiting payment',
-  'payment-pending': 'Awaiting payment',
-  'converted': 'Track billing cycle',
+  'trial-active': 'Pilot',
+  'payment-pending': 'Client Review',
+  'converted': 'Contract',
   'closed-lost': 'Add reason',
   'unsubscribed': 'Do not contact',
   'cold-no-response': 'Cold',
@@ -760,20 +773,17 @@ export function recalculateNextAction(lead: Lead): IntelligentAction {
       if (needsApproval && needsCreds) return { action: 'Client Review', reason: 'Approval and credentials pending', urgency: 'today', followUpDate: now.toISOString() };
       if (needsApproval) return { action: 'Client Review', reason: 'Approval pending', urgency: 'today', followUpDate: now.toISOString() };
       if (needsCreds) return { action: 'Credentials missing', reason: 'Credentials pending', urgency: 'today', followUpDate: now.toISOString() };
-      if (!lead.platform) return { action: 'Platform missing', reason: 'Platform pending', urgency: 'today', followUpDate: now.toISOString() };
+      if ((lead.paymentStatus !== 'paid' && !lead.paymentReceivedAt) || !lead.paymentVerifiedAt) return { action: 'Verify payment', reason: 'Payment verification pending', urgency: 'today', followUpDate: now.toISOString() };
       return { action: 'Onboarding queue', reason: 'Ready for onboarding', urgency: 'today', followUpDate: addDays(1) };
     }
 
     case 'trial-active': {
-      const daysLeft = getTrialDaysLeft(lead);
-      const onboardingDone = (lead.tasks || []).some(t => t.type === 'onboarding' && t.completed);
-      if (!onboardingDone && daysLeft !== null && daysLeft > 10) return { action: 'Onboarding queue', reason: 'Client setup pending', urgency: 'today', followUpDate: now.toISOString() };
+      const daysLeft = getPilotDaysLeft(lead);
       if (daysLeft !== null) {
-        if (daysLeft <= 0) return { action: 'Decision overdue', reason: 'Decision overdue', urgency: 'today', followUpDate: now.toISOString() };
-        if (daysLeft <= 2) return { action: `Decision due in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`, reason: 'Decision due soon', urgency: 'today', followUpDate: now.toISOString() };
-        if (daysLeft <= 7) return { action: `Check-in due`, reason: `${daysLeft} days left`, urgency: 'today', followUpDate: addDays(1) };
+        if (daysLeft <= 0) return { action: 'Pilot decision due', reason: 'Move to Contract or Lost', urgency: 'today', followUpDate: now.toISOString() };
+        if (daysLeft <= 5) return { action: `Pilot ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`, reason: 'Decision due soon', urgency: 'today', followUpDate: now.toISOString() };
       }
-      return { action: 'Active onboarding', reason: 'Client activation in progress', urgency: 'upcoming', followUpDate: addDays(7) };
+      return { action: 'Pilot active', reason: 'Paid pilot running', urgency: 'upcoming', followUpDate: addDays(7) };
     }
 
     case 'payment-pending': {
@@ -783,7 +793,7 @@ export function recalculateNextAction(lead: Lead): IntelligentAction {
     }
 
     case 'converted':
-      return { action: 'Active client', reason: 'Recurring client', urgency: 'upcoming', followUpDate: addDays(30) };
+      return { action: 'Contract client', reason: 'Recurring client', urgency: 'upcoming', followUpDate: addDays(30) };
 
     case 'closed-lost': case 'inbound-disqualified':
       return { action: 'Closed lost', reason: 'Closed', urgency: 'upcoming', followUpDate: addDays(90) };
@@ -1115,12 +1125,18 @@ export function getTrialDaysLeft(lead: Lead): number | null {
   return Math.ceil((new Date(lead.trialEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 }
 
+export function getPilotDaysLeft(lead: Lead): number | null {
+  const end = lead.pilotEndDate || lead.trialEndDate;
+  if (!end) return null;
+  return Math.ceil((new Date(end).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
 export function getTrialMilestone(lead: Lead): { label: string; urgency: 'normal' | 'warning' | 'overdue' } | null {
-  const days = getTrialDaysLeft(lead);
+  const days = getPilotDaysLeft(lead);
   if (days === null) return null;
   if (days <= 0) return { label: 'Decision overdue', urgency: 'overdue' };
   if (days <= 2) return { label: `Decision due in ${days} day${days > 1 ? 's' : ''}`, urgency: 'overdue' };
-  if (days <= 4) return { label: `Check-in due in ${days} days`, urgency: 'warning' };
+  if (days <= 5) return { label: `Pilot ends in ${days} days`, urgency: 'warning' };
   if (days <= 7) return { label: `${days} days left`, urgency: 'warning' };
   return { label: `${days} days left`, urgency: 'normal' };
 }

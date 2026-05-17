@@ -107,7 +107,7 @@ export function LeadershipActionPanel({ lead, view, onAction, onOutcomeSubmit }:
 
           <div className="flex gap-2">
             <Button size="sm" className="h-7 text-xs flex-1" onClick={() => onAction?.('approve')}>
-              <Shield className="h-3 w-3 mr-1" /> Approve Trial
+              <Shield className="h-3 w-3 mr-1" /> Review Client
             </Button>
             {!hasCreds && (
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onAction?.('credentials')}>

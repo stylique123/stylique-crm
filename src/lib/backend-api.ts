@@ -19,8 +19,21 @@ export interface ConnectorPingResult {
 const TOKEN_KEY = 'stylique:apiToken';
 const TOKEN_EXP_KEY = 'stylique:apiTokenExpiresAt';
 
+export interface AuthSession {
+  userId: string;
+  role: string;
+  expiresAt?: number;
+}
+
+export function isBackendAuthRequired(): boolean {
+  return import.meta.env.VITE_REQUIRE_BACKEND_AUTH === 'true';
+}
+
 export function getApiBaseUrl(): string {
-  return (import.meta.env.VITE_STYLIQUE_API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/+$/, '');
+  const configured = String(import.meta.env.VITE_STYLIQUE_API_BASE_URL || '').trim();
+  const fallback = typeof window !== 'undefined' ? window.location.origin : '';
+  const base = !configured || configured.includes('CHANGE-ME') ? fallback : configured;
+  return base.replace(/\/+$/, '');
 }
 
 export function getApiToken(): string {
@@ -41,6 +54,28 @@ export function saveApiToken(token: string, expiresAt?: number) {
   } else {
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(TOKEN_EXP_KEY);
+  }
+}
+
+export function logoutBackend() {
+  saveApiToken('');
+}
+
+export function getAuthSession(): AuthSession | null {
+  const token = getApiToken();
+  if (!token) return null;
+  try {
+    const [, body] = token.split('.');
+    if (!body) return null;
+    const payload = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')));
+    if (!payload?.sub) return null;
+    return {
+      userId: String(payload.sub),
+      role: String(payload.role || ''),
+      expiresAt: Number(payload.exp || 0) || undefined,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -95,4 +130,11 @@ export async function pingConnector(key: ConnectorKey): Promise<ConnectorPingRes
       message: error instanceof Error ? error.message : 'Connector ping failed',
     };
   }
+}
+
+export async function submitBookDemoLead(payload: Record<string, unknown>): Promise<{ ok: true; leadId: string; merged?: boolean }> {
+  return apiFetch<{ ok: true; leadId: string; merged?: boolean }>('/api/book-demo', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

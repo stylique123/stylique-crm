@@ -83,10 +83,11 @@ export function confirmPaymentAndRoll(
   paidBy: string,
   reference?: string,
   notes?: string,
+  paidAt?: string,
 ): Lead {
   const seeded = ensureLedgerInitialized(lead);
   const ledger = [...(seeded.paymentLedger || [])];
-  const now = new Date();
+  const now = paidAt ? new Date(paidAt) : new Date();
   const nowIso = now.toISOString();
 
   // Find current entry to pay.

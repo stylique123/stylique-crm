@@ -12,7 +12,7 @@ import {
   getWeeklyKPIConfig, saveWeeklyKPIConfig, type WeeklyKPIConfig,
 } from '@/engine/weekly-kpi-engine';
 import {
-  getPackagePricing, savePackagePricing, type PackagePriceTable,
+  getPackageLabels, getPackagePricing, savePackageLabels, savePackagePricing, type PackageLabelTable, type PackagePriceTable,
 } from '@/lib/package-pricing';
 import {
   getConnectorReadiness, getConnectors, saveConnectors, type ConnectorConfig,
@@ -20,6 +20,7 @@ import {
 import {
   getApiBaseUrl, getBackendHealth, loginToBackend, pingConnector, type BackendHealth,
 } from '@/lib/backend-api';
+import { useCompanyStore } from '@/lib/company-store';
 import { useUser } from '@/lib/user-context';
 import { PLAN_LABELS, type Currency, type SubscriptionPlan } from '@/types/crm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,15 +94,19 @@ function blankEmployee(): EmployeeProfile {
 
 export default function SettingsPage() {
   const empStore = useEmployees();
+  const companyStore = useCompanyStore();
   const { currentUser } = useUser();
   const [weekly, setWeekly] = useState<WeeklyKPIConfig>(getWeeklyKPIConfig);
   const [pricing, setPricing] = useState<PackagePriceTable>(getPackagePricing);
+  const [packageLabels, setPackageLabels] = useState<PackageLabelTable>(getPackageLabels);
   const [connectors, setConnectors] = useState<ConnectorConfig[]>(getConnectors);
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
   const [apiPassword, setApiPassword] = useState('');
   const [connectorChecks, setConnectorChecks] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<EmployeeProfile | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [reassigning, setReassigning] = useState<EmployeeProfile | null>(null);
+  const [reassignTo, setReassignTo] = useState('');
 
   useEffect(() => {
     getBackendHealth().then(setBackendHealth);
@@ -125,12 +130,73 @@ export default function SettingsPage() {
 
   const toggleActive = (e: EmployeeProfile) => {
     const nextActive = !e.active;
+    if (!nextActive) {
+      const ownedCount = companyStore.companies.filter(company =>
+        company.assignedTo === e.id ||
+        company.assigned_sdr === e.id ||
+        company.record_owner === e.id ||
+        company.assigned_onboarding_owner === e.id
+      ).length;
+      if (ownedCount > 0) {
+        const fallback =
+          empStore.employees.find(emp => emp.id === e.manager && emp.active)?.id ||
+          empStore.employees.find(emp => emp.active && emp.id !== e.id && emp.role === e.role)?.id ||
+          empStore.employees.find(emp => emp.active && emp.id !== e.id && (emp.role === 'ceo' || emp.role === 'coo'))?.id ||
+          '';
+        setReassignTo(fallback);
+        setReassigning(e);
+        return;
+      }
+    }
     empStore.saveEmployee({
       ...e,
       active: nextActive,
       employmentStatus: nextActive ? (e.employmentStatus === 'inactive' ? 'confirmed' : e.employmentStatus) : 'inactive',
     });
-    toast.success(`${e.fullName} ${nextActive ? 'reactivated' : 'deactivated'}`);
+    toast.success(
+      nextActive
+        ? `${e.fullName} reactivated`
+        : `${e.fullName} deactivated`
+    );
+  };
+
+  const completeReassignment = () => {
+    if (!reassigning || !reassignTo) {
+      toast.error('Choose a new owner before deactivating');
+      return;
+    }
+    const now = new Date().toISOString();
+    let reassigned = 0;
+    companyStore.companies.forEach(company => {
+      const owned =
+        company.assignedTo === reassigning.id ||
+        company.assigned_sdr === reassigning.id ||
+        company.record_owner === reassigning.id ||
+        company.assigned_onboarding_owner === reassigning.id;
+      if (!owned) return;
+      reassigned++;
+      companyStore.saveCompany({
+        ...company,
+        assignedTo: company.assignedTo === reassigning.id ? reassignTo : company.assignedTo,
+        assigned_sdr: company.assigned_sdr === reassigning.id ? reassignTo : company.assigned_sdr,
+        record_owner: company.record_owner === reassigning.id ? reassignTo : company.record_owner,
+        assigned_onboarding_owner: company.assigned_onboarding_owner === reassigning.id ? reassignTo : company.assigned_onboarding_owner,
+        notes: [company.notes, `[Ownership] Previous owner: ${reassigning.fullName}`].filter(Boolean).join('\n'),
+        updatedAt: now,
+      });
+      companyStore.addActivity({
+        id: crypto.randomUUID(),
+        leadId: company.id,
+        type: 'assigned',
+        description: `${company.companyName} reassigned from ${reassigning.fullName}`,
+        createdAt: now,
+        createdBy: currentUser,
+      });
+    });
+    empStore.saveEmployee({ ...reassigning, active: false, employmentStatus: 'inactive' });
+    toast.success(`${reassigning.fullName} deactivated · ${reassigned} records reassigned`);
+    setReassigning(null);
+    setReassignTo('');
   };
 
   const submitEdit = () => {
@@ -257,12 +323,16 @@ export default function SettingsPage() {
               <div className="overflow-x-auto rounded-md border border-border/40">
                 <div className="min-w-[560px]">
                   <div className="grid grid-cols-5 gap-2 px-3 py-2 border-b border-border/30 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-                    <div>Package</div>
+                    <div>Package name</div>
                     {CURRENCIES.map(c => <div key={c}>{c}</div>)}
                   </div>
                   {PLANS.map(plan => (
                     <div key={plan} className="grid grid-cols-5 gap-2 px-3 py-2 border-b border-border/20 last:border-0 items-center">
-                      <div className="text-xs font-medium">{PLAN_LABELS[plan]}</div>
+                      <Input
+                        value={packageLabels[plan]}
+                        onChange={e => setPackageLabels({ ...packageLabels, [plan]: e.target.value })}
+                        className="h-8 text-xs font-medium"
+                      />
                       {CURRENCIES.map(currency => (
                         <Input
                           key={`${plan}-${currency}`}
@@ -282,7 +352,7 @@ export default function SettingsPage() {
               <Button
                 size="sm"
                 className="h-7 text-xs"
-                onClick={() => { savePackagePricing(pricing); toast.success('Package pricing saved'); }}
+                onClick={() => { savePackagePricing(pricing); savePackageLabels(packageLabels); toast.success('Package settings saved'); }}
               >
                 Save packages
               </Button>
@@ -538,11 +608,70 @@ export default function SettingsPage() {
                   onChange={v => setEditing({ ...editing, active: v })}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <ToggleRow
+                  label="Can import"
+                  checked={!!editing.canImportLeads}
+                  onChange={v => setEditing({ ...editing, canImportLeads: v })}
+                />
+                <ToggleRow
+                  label="Can add leads"
+                  checked={!!editing.canAddManualLeads}
+                  onChange={v => setEditing({ ...editing, canAddManualLeads: v })}
+                />
+                <ToggleRow
+                  label="Can approve"
+                  checked={!!editing.canApprove}
+                  onChange={v => setEditing({ ...editing, canApprove: v })}
+                />
+                <ToggleRow
+                  label="Inbound access"
+                  checked={!!editing.inboundPermission}
+                  onChange={v => setEditing({ ...editing, inboundPermission: v })}
+                />
+              </div>
+              <Field label="Data visibility">
+                <Select value={editing.dataVisibility || 'own'} onValueChange={v => setEditing({ ...editing, dataVisibility: v as EmployeeProfile['dataVisibility'] })}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="own">Own records</SelectItem>
+                    <SelectItem value="team">Team records</SelectItem>
+                    <SelectItem value="all">All records</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
             </div>
 
             <DialogFooter className="mt-3">
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
               <Button size="sm" onClick={submitEdit}>{isNew ? 'Add teammate' : 'Save changes'}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {reassigning && (
+        <Dialog open={!!reassigning} onOpenChange={(open) => { if (!open) setReassigning(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base">Reassign active records</DialogTitle>
+              <DialogDescription>
+                {reassigning.fullName} owns active CRM records. Choose the new owner before deactivation.
+              </DialogDescription>
+            </DialogHeader>
+            <Field label="New owner">
+              <Select value={reassignTo} onValueChange={setReassignTo}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Choose owner" /></SelectTrigger>
+                <SelectContent>
+                  {empStore.employees.filter(emp => emp.active && emp.id !== reassigning.id).map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>{emp.fullName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <DialogFooter>
+              <Button variant="ghost" size="sm" onClick={() => setReassigning(null)}>Cancel</Button>
+              <Button size="sm" onClick={completeReassignment}>Reassign and deactivate</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

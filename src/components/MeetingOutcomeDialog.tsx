@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { X, Clock, XCircle, ThumbsUp } from 'lucide-react';
+import { X, Clock, XCircle, ArrowRight } from 'lucide-react';
 import { getDealContext } from '@/engine/action-chain';
 import type { MeetingOutcomeType } from '@/types/crm';
 import type { Lead } from '@/types/crm';
@@ -25,8 +25,9 @@ interface MeetingOutcomeOption {
 }
 
 const MEETING_OUTCOMES: MeetingOutcomeOption[] = [
-  { value: 'interested', label: 'Decision Pending', icon: ThumbsUp, color: 'border-primary/20 hover:border-primary/50' },
-  { value: 'followup_later', label: 'Follow up later', icon: Clock, color: 'border-amber-500/15 hover:border-amber-500/40' },
+  { value: 'interested', label: 'Decision Pending', icon: ArrowRight, color: 'border-primary/20 hover:border-primary/50' },
+  { value: 'propose_trial', label: 'Move to Client Review', icon: ArrowRight, color: 'border-primary/20 hover:border-primary/50' },
+  { value: 'followup_later', label: 'Reschedule / follow up', icon: Clock, color: 'border-amber-500/15 hover:border-amber-500/40' },
   { value: 'not_fit', label: 'Closed Lost', icon: XCircle, color: 'border-destructive/12 hover:border-destructive/30' },
   { value: 'no_show', label: 'No show', icon: X, color: 'border-destructive/12 hover:border-destructive/30' },
 ];
@@ -54,13 +55,13 @@ export function MeetingOutcomeDialog({ open, onOpenChange, companyName, meetingI
   const [nextStepDate, setNextStepDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const needsDate = selected === 'followup_later';
+  const needsDate = selected === 'followup_later' || selected === 'reschedule';
 
   // Deal context
   const dealCtx = useMemo(() => lead ? getDealContext(lead) : null, [lead]);
 
   const handleSubmit = () => {
-    if (!selected || submitting) return;
+    if (!selected || !summary.trim() || submitting) return;
     setSubmitting(true);
     onSubmit({
       outcome: selected, summary, nextStep,
@@ -98,6 +99,16 @@ export function MeetingOutcomeDialog({ open, onOpenChange, companyName, meetingI
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 mt-2">
+          <div>
+            <Label className="text-xs text-muted-foreground/50 mb-1.5 block">Meeting notes / outcome</Label>
+            <Textarea
+              value={summary} onChange={e => setSummary(e.target.value)}
+              placeholder="wants proposal, pricing discussion needed, follow up next week..."
+              rows={3} className="text-sm"
+              autoFocus
+            />
+          </div>
+          <Label className="text-xs text-muted-foreground/50 block">Next state</Label>
           <div className="grid grid-cols-2 gap-2">
             {MEETING_OUTCOMES.map(opt => {
               const Icon = opt.icon;
@@ -121,17 +132,9 @@ export function MeetingOutcomeDialog({ open, onOpenChange, companyName, meetingI
 
           {selected && (
             <>
-              <div>
-                <Label className="text-xs text-muted-foreground/50 mb-1.5 block">Meeting notes / outcome</Label>
-                <Textarea
-                  value={summary} onChange={e => setSummary(e.target.value)}
-                  placeholder="wants proposal, pricing discussion needed, follow up next week..."
-                  rows={2} className="text-sm"
-                />
-              </div>
               {needsDate && (
                 <div>
-                  <Label className="text-xs text-muted-foreground/50 mb-1.5 block">Follow-up date</Label>
+                  <Label className="text-xs text-muted-foreground/50 mb-1.5 block">Next meeting / follow-up date</Label>
                   <Input
                     type="datetime-local" value={nextStepDate}
                     onChange={e => setNextStepDate(e.target.value)} className="text-sm"
@@ -143,7 +146,7 @@ export function MeetingOutcomeDialog({ open, onOpenChange, companyName, meetingI
 
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button size="sm" onClick={handleSubmit} disabled={!selected || submitting}>
+            <Button size="sm" onClick={handleSubmit} disabled={!selected || !summary.trim() || submitting}>
               {submitting ? 'Saving...' : 'Save result'}
             </Button>
           </div>

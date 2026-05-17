@@ -24,8 +24,10 @@ import { hasValidCredentials, PLAN_LABELS, TEAM_MEMBERS, getActiveDeal, formatMo
 import { CompanyDetailSheet } from '@/components/CompanyDetailSheet';
 import { ClientReviewApprovalDialog } from '@/components/ClientReviewApprovalDialog';
 import { CredentialsDialog } from '@/components/CredentialsDialog';
-import { PaymentOutcomeDialog, type PaymentOutcome } from '@/components/PaymentOutcomeDialog';
+import { PaymentOutcomeDialog, type PaymentConfirmationDetails, type PaymentOutcome } from '@/components/PaymentOutcomeDialog';
 import { processPaymentOutcome } from '@/engine/outcome-engine';
+import { getCommercialState } from '@/engine/commercial-state';
+import { executeTrialActivation } from '@/engine/action-executor';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,7 +42,7 @@ export default function OnboardingClientsPage() {
   const bridge = useMemo(() => ({ saveCompany, addActivity }), [saveCompany]);
   const { isOnboarding, role, currentUser, userName, isSdr, isLeadership } = useUser();
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<'active' | 'review' | 'onboarding' | 'overdue' | 'history'>('active');
+  const [view, setView] = useState<'active' | 'review' | 'onboarding' | 'pilot' | 'contract' | 'due-soon' | 'overdue' | 'history'>('active');
   const [selected, setSelected] = useState<Lead | null>(null);
   const [reviewLead, setReviewLead] = useState<Lead | null>(null);
   const [credLead, setCredLead] = useState<Lead | null>(null);
@@ -51,8 +53,10 @@ export default function OnboardingClientsPage() {
   useEffect(() => {
     if (!location.hash) return;
     const id = location.hash.slice(1);
-    if (id === 'review' || id === 'payment' || id === 'credentials') setView('review');
+    if (id === 'review') setView('review');
     if (id === 'queue') setView('onboarding');
+    if (id === 'pilot') setView('pilot');
+    if (id === 'contract') setView('contract');
     if (id === 'active') setView('active');
     if (id === 'overdue') setView('overdue');
     const el = document.getElementById(id);
@@ -76,13 +80,16 @@ export default function OnboardingClientsPage() {
     return companies;
   }, [companies, isLeadership, isOnboarding, isSdr, currentUser]);
 
-  const isClientReview = (c: Lead) =>
-    c.stage === 'trial-proposed' || c.stage === 'trial-active';
-  const isAwaitingPayment = (c: Lead) =>
-    c.stage === 'payment-pending' && c.paymentStatus !== 'paid';
-  const isOnboardingPending = (c: Lead) => c.paymentStatus === 'paid' && !c.onboardingDoneAt;
-  const isActive = (c: Lead) => c.paymentStatus === 'paid' && !!c.onboardingDoneAt;
-  const isOverdue = (c: Lead) => c.paymentStatus === 'overdue';
+  const isClientReview = (c: Lead) => ['client_review', 'conversion_pending'].includes(getCommercialState(c));
+  const isOnboardingPending = (c: Lead) => getCommercialState(c) === 'onboarding_pending';
+  const isPilot = (c: Lead) => getCommercialState(c) === 'pilot';
+  const isContract = (c: Lead) => getCommercialState(c) === 'contract' || c.stage === 'converted';
+  const isDueSoon = (c: Lead) => getCommercialState(c) === 'payment_due_soon';
+  const isActive = (c: Lead) => {
+    const state = getCommercialState(c);
+    return state === 'active_client' || state === 'pilot' || state === 'contract';
+  };
+  const isOverdue = (c: Lead) => getCommercialState(c) === 'overdue';
   const isClosed = (c: Lead) => c.stage === 'closed-lost' || c.stage === 'unsubscribed';
 
   // SDR Clients are STRICT (Part 7): only fully-paid + onboarded records they own.
@@ -90,19 +97,19 @@ export default function OnboardingClientsPage() {
   // Overdue, Closed) are leadership/onboarding concerns — hidden from SDRs here.
   const sdrStrict = isSdr && !isLeadership && !isOnboarding;
   const review = useMemo(() => (sdrStrict || isOnboarding) ? [] : scoped.filter(isClientReview).filter(matches), [scoped, query, sdrStrict, isOnboarding]);
-  const awaiting = useMemo(() => (sdrStrict || isOnboarding) ? [] : scoped.filter(isAwaitingPayment).filter(matches), [scoped, query, sdrStrict, isOnboarding]);
   const allPending = useMemo(() => sdrStrict ? [] : scoped
     .filter(isOnboardingPending).filter(matches)
     .sort((a, b) => (a.paymentReceivedAt || '').localeCompare(b.paymentReceivedAt || ''))
   , [scoped, query, sdrStrict]);
-  // Records paid but missing credentials — leadership/onboarding gating bucket.
-  const awaitingCreds = useMemo(() => allPending.filter(c => !hasValidCredentials(c)), [allPending]);
   // True onboarding queue — paid AND credentials saved.
   const queue = useMemo(() => allPending.filter(c => hasValidCredentials(c)), [allPending]);
+  const pilot = useMemo(() => scoped.filter(isPilot).filter(matches), [scoped, query]);
+  const contract = useMemo(() => scoped.filter(isContract).filter(matches), [scoped, query]);
   const active = useMemo(() => scoped
     .filter(isActive).filter(matches)
     .sort((a, b) => a.companyName.localeCompare(b.companyName))
   , [scoped, query]);
+  const dueSoon = useMemo(() => (sdrStrict || isOnboarding) ? [] : scoped.filter(isDueSoon).filter(matches), [scoped, query, sdrStrict, isOnboarding]);
   const overdue = useMemo(() => (sdrStrict || isOnboarding) ? [] : scoped.filter(isOverdue).filter(matches), [scoped, query, sdrStrict, isOnboarding]);
   const closed = useMemo(() => (sdrStrict || isOnboarding) ? [] : scoped.filter(isClosed).filter(matches), [scoped, query, sdrStrict, isOnboarding]);
 
@@ -133,25 +140,38 @@ export default function OnboardingClientsPage() {
   };
 
   const markDone = (c: Lead) => {
-    const now = new Date().toISOString();
-    saveCompany({ ...c, onboardingDoneAt: now, onboardingDoneBy: currentUser, updatedAt: now });
-    addActivity({
-      id: uid(),
-      leadId: c.id,
-      type: 'action-completed',
-      description: `Onboarding complete · ${userName}`,
-      createdAt: now,
-      createdBy: currentUser,
-    });
-    toast.success(`${c.companyName} onboarded`);
+    const result = executeTrialActivation(c, currentUser, bridge, 30);
+    if (!result.success) {
+      toast.error(result.message);
+      return;
+    }
+    toast.success(`${c.companyName} moved to Pilot`);
+    refresh();
   };
 
-  const confirmPayment = (outcome: PaymentOutcome, notes: string) => {
+  const confirmPayment = (outcome: PaymentOutcome, notes: string, details?: PaymentConfirmationDetails) => {
     if (!paymentLead) return;
     const fresh = companies.find(l => l.id === paymentLead.id) || paymentLead;
-    processPaymentOutcome(fresh, outcome, notes, currentUser, bridge);
+    const leadForPayment = outcome === 'paid' && details ? {
+      ...fresh,
+      proposed_package: details.package,
+      proposed_currency: details.currency,
+      proposed_value: details.amount,
+      subscriptionPlan: details.package,
+      nextPaymentDate: new Date(details.paymentDate).toISOString(),
+    } : fresh;
+    const detailNotes = details
+      ? [
+        notes,
+        `Payment date: ${details.paymentDate}`,
+        `Package: ${PLAN_LABELS[details.package]}`,
+        `Amount: ${formatMoney(details.amount, details.currency)}`,
+        details.note ? `Note: ${details.note}` : '',
+      ].filter(Boolean).join('\n')
+      : notes;
+    processPaymentOutcome(leadForPayment, outcome, detailNotes, currentUser, bridge, details?.paymentDate);
     const wasPaid = outcome === 'paid';
-    const target = fresh;
+    const target = leadForPayment;
     setPaymentLead(null);
     refresh();
     if (wasPaid && !hasValidCredentials(target)) {
@@ -177,9 +197,12 @@ export default function OnboardingClientsPage() {
       </div>
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        <ViewButton label={`Current clients · ${active.length}`} active={view === 'active'} onClick={() => setView('active')} />
-        {!isOnboarding && <ViewButton label={`Review / payment · ${review.length + awaiting.length + awaitingCreds.length}`} active={view === 'review'} onClick={() => setView('review')} />}
-        <ViewButton label={`Stuck in onboarding · ${awaitingCreds.length + queue.length}`} active={view === 'onboarding'} onClick={() => setView('onboarding')} />
+        <ViewButton label={`Current Clients · ${active.length}`} active={view === 'active'} onClick={() => setView('active')} />
+        {!isOnboarding && <ViewButton label={`Client Review · ${review.length}`} active={view === 'review'} onClick={() => setView('review')} />}
+        <ViewButton label={`${isOnboarding ? 'Onboarding Tasks' : 'Onboarding Queue'} · ${queue.length}`} active={view === 'onboarding'} onClick={() => setView('onboarding')} />
+        <ViewButton label={`Pilot · ${pilot.length}`} active={view === 'pilot'} onClick={() => setView('pilot')} />
+        <ViewButton label={`Contract · ${contract.length}`} active={view === 'contract'} onClick={() => setView('contract')} />
+        {!isOnboarding && <ViewButton label={`Due Soon · ${dueSoon.length}`} active={view === 'due-soon'} onClick={() => setView('due-soon')} />}
         {!isOnboarding && <ViewButton label={`Overdue · ${overdue.length}`} active={view === 'overdue'} onClick={() => setView('overdue')} />}
         {!isOnboarding && <ViewButton label={`History · ${closed.length}`} active={view === 'history'} onClick={() => setView('history')} />}
       </div>
@@ -214,11 +237,15 @@ export default function OnboardingClientsPage() {
                         {c.subscriptionPlan && (
                           <Badge variant="outline" className="text-[10px]">{PLAN_LABELS[c.subscriptionPlan]}</Badge>
                         )}
-                        <Badge variant="outline" className="text-[10px] text-success border-success/30">Active</Badge>
+                        <Badge variant="outline" className="text-[10px] text-success border-success/30">
+                          {c.stage === 'trial-active' ? 'Pilot' : c.stage === 'converted' ? 'Contract' : 'Active'}
+                        </Badge>
                       </div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">
                         {c.contactName}
                         {c.onboardingDoneAt && <> · Live since {format(new Date(c.onboardingDoneAt), 'MMM d')}</>}
+                        {getActiveDeal(c).value > 0 && <> · {formatMoney(getActiveDeal(c).value, getActiveDeal(c).currency)}/mo</>}
+                        {c.nextPaymentDate && <> · Renewal {format(new Date(c.nextPaymentDate), 'MMM d')}</>}
                       </div>
                     </div>
                   </CardContent>
@@ -232,7 +259,7 @@ export default function OnboardingClientsPage() {
       {view === 'review' && review.length > 0 && (
         <section id="review" className="space-y-2 scroll-mt-16">
           <h2 className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">
-            Review / Payment · Client Review · {review.length}
+            Client Review · {review.length}
           </h2>
           <div className="space-y-1.5">
             {review.map(c => (
@@ -245,9 +272,9 @@ export default function OnboardingClientsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium truncate">{c.companyName}</span>
-                      <Badge variant="outline" className="text-[10px] text-primary border-primary/30">Moved to Client Review</Badge>
+                        <Badge variant="outline" className="text-[10px] text-primary border-primary/30">Needs CEO Review</Badge>
                     </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">{c.contactName} · Leadership owns next step</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">{c.contactName} · Review package, amount, and payment status</div>
                   </div>
                   </button>
                   {canApprove && (
@@ -262,82 +289,9 @@ export default function OnboardingClientsPage() {
         </section>
       )}
 
-      {view === 'review' && awaiting.length > 0 && (
-        <section id="payment" className="space-y-2 scroll-mt-16">
-          <h2 className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">
-            Review / Payment · Awaiting Payment · {awaiting.length}
-          </h2>
-          <div className="space-y-1.5">
-            {awaiting.map(c => (
-              <Card key={c.id} className="hover:border-primary/30 transition-colors">
-                <CardContent className="py-3 px-4 flex items-center gap-3">
-                  <button onClick={() => setSelected(c)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-                    <div className="h-8 w-8 rounded-md bg-warning/10 flex items-center justify-center text-xs font-semibold text-warning shrink-0">
-                      {c.companyName.charAt(0)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium truncate">{c.companyName}</span>
-                      <Badge variant="outline" className="text-[10px] text-warning border-warning/30">Awaiting Payment</Badge>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">
-                      {c.contactName} · {PLAN_LABELS[getActiveDeal(c).package]} {formatMoney(getActiveDeal(c).value, getActiveDeal(c).currency)}
-                      {TEAM_MEMBERS.find(m => m.id === c.assignedTo)?.name && <> · SDR {TEAM_MEMBERS.find(m => m.id === c.assignedTo)?.name.split(' ')[0]}</>}
-                    </div>
-                    </div>
-                  </button>
-                  {canConfirmPayment && (
-                    <Button size="sm" className="h-8 text-xs shrink-0" onClick={() => setPaymentLead(c)}>
-                      Confirm Payment
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {(view === 'review' || view === 'onboarding') && awaitingCreds.length > 0 && (
-        <section id="credentials" className="space-y-2 scroll-mt-16">
-          <h2 className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">
-            {view === 'review' ? 'Review / Payment · Credentials' : 'Stuck in Onboarding · Credentials'} · {awaitingCreds.length}
-          </h2>
-          <div className="space-y-1.5">
-            {awaitingCreds.map(c => (
-              <Card key={c.id} className="hover:border-warning/30 transition-colors">
-                <CardContent className="py-3 px-4 flex items-center gap-3">
-                  <button onClick={() => setSelected(c)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-                    <div className="h-8 w-8 rounded-md bg-warning/10 flex items-center justify-center text-xs font-semibold text-warning shrink-0">
-                      {c.companyName.charAt(0)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium truncate">{c.companyName}</span>
-                        <Badge variant="outline" className="text-[10px] text-warning border-warning/30">
-                          <AlertCircle className="h-2.5 w-2.5 mr-1" />Needs credentials
-                        </Badge>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        {c.contactName}{c.paymentReceivedAt && <> · Paid {format(new Date(c.paymentReceivedAt), 'MMM d')}</>}
-                      </div>
-                    </div>
-                  </button>
-                  {canEditCreds && (
-                    <Button size="sm" className="h-8 text-xs shrink-0" onClick={() => setCredLead(c)}>
-                      Add credentials
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
-
       {view === 'onboarding' && <section id="queue" className="space-y-2 scroll-mt-16">
         <h2 className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">
-          Onboarding Queue · {queue.length}
+          {isOnboarding ? 'Onboarding Tasks' : 'Onboarding Queue'} · {queue.length}
         </h2>
         {queue.length === 0 ? (
           <p className="text-xs text-muted-foreground/60 px-1">Nothing pending.</p>
@@ -386,6 +340,56 @@ export default function OnboardingClientsPage() {
           </div>
         )}
       </section>}
+
+      {view === 'pilot' && (
+        <ClientListSection
+          id="pilot"
+          title={`Pilot · ${pilot.length}`}
+          empty="No pilots running."
+          items={pilot}
+          badge="Pilot"
+          onSelect={setSelected}
+        />
+      )}
+
+      {view === 'contract' && (
+        <ClientListSection
+          id="contract"
+          title={`Contract · ${contract.length}`}
+          empty="No contract clients yet."
+          items={contract}
+          badge="Contract"
+          onSelect={setSelected}
+        />
+      )}
+
+      {view === 'due-soon' && dueSoon.length > 0 && (
+        <section id="due-soon" className="space-y-2 scroll-mt-16">
+          <h2 className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">
+            Due Soon · {dueSoon.length}
+          </h2>
+          <div className="space-y-1.5">
+            {dueSoon.map(c => (
+              <Card key={c.id} className="cursor-pointer hover:border-warning/30 transition-colors" onClick={() => setSelected(c)}>
+                <CardContent className="py-3 px-4 flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-md bg-warning/10 flex items-center justify-center text-xs font-semibold text-warning shrink-0">
+                    {c.companyName.charAt(0)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium truncate">{c.companyName}</span>
+                      <Badge variant="outline" className="text-[10px] text-warning border-warning/30">Due Soon</Badge>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      {c.contactName}{c.nextPaymentDate && <> · Renewal {format(new Date(c.nextPaymentDate), 'MMM d')}</>}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {view === 'overdue' && overdue.length > 0 && (
         <section id="overdue" className="space-y-2 scroll-mt-16">
@@ -452,7 +456,12 @@ export default function OnboardingClientsPage() {
         open={!!reviewLead}
         onOpenChange={(o) => { if (!o) setReviewLead(null); }}
         lead={reviewLead}
-        onDone={refresh}
+        onDone={(lead, mode) => {
+          refresh();
+          if (mode === 'approve') {
+            setTimeout(() => setPaymentLead(lead), 150);
+          }
+        }}
       />
 
       {credLead && (
@@ -492,5 +501,50 @@ function ViewButton({ label, active, onClick }: { label: string; active: boolean
     >
       {label}
     </button>
+  );
+}
+
+function ClientListSection({
+  id, title, empty, items, badge, onSelect,
+}: {
+  id: string;
+  title: string;
+  empty: string;
+  items: Lead[];
+  badge: string;
+  onSelect: (lead: Lead) => void;
+}) {
+  return (
+    <section id={id} className="space-y-2 scroll-mt-16">
+      <h2 className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">{title}</h2>
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground/60 px-1">{empty}</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map(c => (
+            <Card key={c.id} className="cursor-pointer hover:border-primary/30 transition-colors" onClick={() => onSelect(c)}>
+              <CardContent className="py-3 px-4 flex items-center gap-3">
+                <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                  {c.companyName.charAt(0)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium truncate">{c.companyName}</span>
+                    <Badge variant="outline" className="text-[10px] text-primary border-primary/30">{badge}</Badge>
+                    {c.subscriptionPlan && <Badge variant="outline" className="text-[10px]">{PLAN_LABELS[c.subscriptionPlan]}</Badge>}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {c.contactName}
+                    {c.pilotEndDate && <> · Pilot ends {format(new Date(c.pilotEndDate), 'MMM d')}</>}
+                    {c.nextPaymentDate && <> · Next payment {format(new Date(c.nextPaymentDate), 'MMM d')}</>}
+                    {getActiveDeal(c).value > 0 && <> · {formatMoney(getActiveDeal(c).value, getActiveDeal(c).currency)}/mo</>}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

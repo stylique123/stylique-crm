@@ -1,20 +1,54 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiBaseUrl, getApiToken, loginToBackend } from '@/lib/backend-api';
+import { getApiBaseUrl, getApiToken, getAuthSession, isBackendAuthRequired, loginToBackend } from '@/lib/backend-api';
 import { useUser } from '@/lib/user-context';
 import { TEAM_MEMBERS } from '@/types/crm';
 
-const AUTH_REQUIRED = import.meta.env.VITE_REQUIRE_BACKEND_AUTH === 'true';
+const AUTH_REQUIRED = isBackendAuthRequired();
+
+function getActiveLoginMembers() {
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = window.localStorage.getItem('stylique-employees');
+      const employees = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(employees) && employees.length) {
+        const active = employees
+          .filter(emp => emp.active !== false)
+          .map(emp => ({ id: String(emp.id), name: String(emp.fullName || emp.name || emp.id) }));
+        if (active.length) return active;
+      }
+    }
+  } catch {
+    /* fall back to static team */
+  }
+  return TEAM_MEMBERS;
+}
 
 export function BackendAuthGate({ children }: { children: ReactNode }) {
   const { currentUser, setCurrentUser } = useUser();
+  const loginMembers = useMemo(getActiveLoginMembers, []);
   const [selectedUser, setSelectedUser] = useState(currentUser);
   const [password, setPassword] = useState('');
   const [token, setToken] = useState(getApiToken);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const session = getAuthSession();
+    if (AUTH_REQUIRED && session?.userId && session.userId !== currentUser) {
+      setCurrentUser(session.userId);
+      setSelectedUser(session.userId);
+    }
+  }, [currentUser, setCurrentUser]);
+
+  useEffect(() => {
+    if (!loginMembers.some(member => member.id === selectedUser) && loginMembers[0]) {
+      setSelectedUser(loginMembers[0].id);
+      setCurrentUser(loginMembers[0].id);
+    }
+  }, [loginMembers, selectedUser, setCurrentUser]);
 
   if (!AUTH_REQUIRED) return <>{children}</>;
 
@@ -67,7 +101,7 @@ export function BackendAuthGate({ children }: { children: ReactNode }) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {TEAM_MEMBERS.map(member => (
+          {loginMembers.map(member => (
             <SelectItem key={member.id} value={member.id}>
               {member.name}
             </SelectItem>

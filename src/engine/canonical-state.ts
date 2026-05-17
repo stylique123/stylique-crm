@@ -235,12 +235,12 @@ export function getVisibleTabs(lead: Lead, viewerRole: ViewerRole): Set<string> 
   const meetingRelevant = ['meeting_booked', 'meeting_completed', 'trial_proposed', 'trial_ready', 'trial_active', 'conversion_pending', 'converted'].includes(state.lifecycle_stage);
   if (hasMeetings || meetingRelevant) tabs.add('meetings');
 
-  // Trial: show if trial-related state exists
-  if (state.trial_stage !== 'not_applicable' && state.trial_stage !== 'not_started') tabs.add('trial');
-  if (['trial_proposed', 'trial_ready', 'trial_active', 'conversion_pending'].includes(state.lifecycle_stage)) tabs.add('trial');
-
   // Payment: show only when commercially relevant
-  if (state.commercial_stage !== 'none' || ['conversion_pending', 'converted'].includes(state.lifecycle_stage) || lead.stage === 'payment-pending') tabs.add('payment');
+  if (
+    state.commercial_stage !== 'none'
+    || ['trial_proposed', 'trial_ready', 'trial_active', 'conversion_pending', 'converted'].includes(state.lifecycle_stage)
+    || lead.stage === 'payment-pending'
+  ) tabs.add('payment');
 
   // Credentials: show only for relevant roles and stages
   const credentialRelevant = state.trial_stage !== 'not_applicable' && state.trial_stage !== 'not_started';
@@ -557,7 +557,7 @@ function deriveNextAction(
     return { next_required_action: 'activate_trial', next_action_label: `Onboarding queue — ${lead.companyName}`, next_action_owner_role: 'onboarding' };
   }
   if (trial === 'active') {
-    return { next_required_action: 'monitor_trial', next_action_label: 'Onboarding active', next_action_owner_role: 'onboarding' };
+    return { next_required_action: 'monitor_trial', next_action_label: 'Pilot active', next_action_owner_role: 'onboarding' };
   }
   if (trial === 'ending' || trial === 'expired') {
     return { next_required_action: 'conversion_push', next_action_label: `Decision pending — ${lead.companyName}`, next_action_owner_role: 'sdr' };
@@ -710,7 +710,7 @@ function deriveUrgency(lead: Lead, lifecycle: LifecycleStage, trial: TrialStage,
 
   if (lifecycle === 'converted') return { urgency: 'none', status_label: 'Active client', status_color: 'text-success' };
   if (lifecycle === 'closed' || lifecycle === 'lost') return { urgency: 'none', status_label: 'Closed', status_color: 'text-muted-foreground' };
-  if (lifecycle === 'trial_active') return { urgency: 'normal', status_label: `Trial running — ${getTrialDaysLeft(lead) ?? '?'}d left`, status_color: 'text-success' };
+  if (lifecycle === 'trial_active') return { urgency: 'normal', status_label: `Pilot running — ${getTrialDaysLeft(lead) ?? '?'}d left`, status_color: 'text-success' };
   if (lifecycle === 'meeting_booked') {
     const nextMeeting = lead.meetingNotes?.find(m => new Date(m.date) > new Date());
     if (nextMeeting) {

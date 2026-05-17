@@ -19,6 +19,7 @@ import { archiveStaleTasksForStage } from '@/engine/task-engine';
 import { allowMutation } from '@/engine/hardening';
 import { emitKPI } from '@/engine/kpi-integration';
 import { emitCRMEvent, type CRMEventType } from '@/engine/event-bus';
+import { confirmPaymentAndRoll } from '@/engine/payment-ledger';
 import type { ActionKPIMetric, KPIActionEntry } from '@/types/kpi';
 
 export type ExecutionChannel = 'email' | 'phone' | 'linkedin' | 'whatsapp' | 'meeting' | 'system';
@@ -411,14 +412,21 @@ export function executeAtomicTrialSetup(
   const completions: ActionCompletion[] = [...(updated.actionCompletions || [])];
   const activities: { desc: string }[] = [];
 
-  // 1. Apply approval if needed
+  // 1. Apply approval/payment verification if needed.
   if (setup.approved && !updated.approvedBy) {
     updated.approvedBy = performedBy;
+    updated.clientReviewApprovedAt = now;
+    updated.clientReviewApprovedBy = performedBy;
+    updated.paymentVerifiedAt = now;
+    updated.paymentVerifiedBy = performedBy;
+    updated.paymentStatus = 'paid';
+    updated.paymentReceivedAt = now;
+    updated = confirmPaymentAndRoll(updated, performedBy, undefined, 'Client review payment verified', now);
     completions.push({
-      id: uid(), action: 'Trial approved', completedAt: now,
+      id: uid(), action: 'Client review approved', completedAt: now,
       completedBy: performedBy, channel: 'system',
     });
-    activities.push({ desc: `✓ Trial approved — ${lead.companyName}` });
+    activities.push({ desc: `Client review approved and payment verified — ${lead.companyName}` });
   }
 
   // 2. Apply credentials if provided (on the SAME object, not a stale re-read)
@@ -455,37 +463,24 @@ export function executeAtomicTrialSetup(
     });
   });
 
-  // 6. AUTO-ACTIVATION: if approval + credentials are now both present, start the trial.
-  // The dialog CTA reads "Save & Start Trial" — honor that contract.
-  const isReadyToStart = !!updated.approvedBy && hasValidCredentials(updated);
-  if (isReadyToStart && updated.stage === 'trial-proposed') {
-    const activation = executeTrialActivation(updated, performedBy, bridge, 14);
-    if (activation.success) {
-      return {
-        success: true,
-        lead: activation.lead,
-        nextAction: activation.nextAction,
-        message: `Trial started for ${lead.companyName}`,
-      };
-    }
-  }
+  const isReadyToStart = !!updated.approvedBy && hasValidCredentials(updated) && updated.paymentStatus === 'paid';
 
   const message = isReadyToStart
-    ? `${lead.companyName} — ready to activate trial`
-    : `Trial setup updated for ${lead.companyName}`;
+    ? `${lead.companyName} — ready for onboarding`
+    : `Client review updated for ${lead.companyName}`;
 
   // Emit canonical event so Decisions / Trials / Tasks pages re-derive buckets.
   // (When auto-activation runs above, executeTrialActivation already emits its own event.)
   if (setup.approved && !lead.approvedBy) {
-    emitCRMEvent('trial_approved', performedBy, `Trial approved for ${lead.companyName}`, {
+    emitCRMEvent('trial_approved', performedBy, `Client review approved for ${lead.companyName}`, {
       leadId: lead.id, companyName: lead.companyName, contactName: lead.contactName,
-      nextStep: isReadyToStart ? 'Ready to activate trial' : 'Awaiting credentials',
+      nextStep: isReadyToStart ? 'Onboarding queue' : 'Awaiting credentials',
     });
   }
   if (setup.credentials) {
     emitCRMEvent('credentials_added', performedBy, `Credentials added for ${lead.companyName}`, {
       leadId: lead.id, companyName: lead.companyName, contactName: lead.contactName,
-      nextStep: isReadyToStart ? 'Ready to activate trial' : 'Awaiting approval',
+      nextStep: isReadyToStart ? 'Onboarding queue' : 'Awaiting approval',
     });
   }
 
@@ -493,20 +488,20 @@ export function executeAtomicTrialSetup(
 }
 
 /**
- * TRIAL ACTIVATION — moves trial-proposed + ready_to_activate → trial-active.
- * Sets trial start/end dates and archives all setup tasks atomically.
+ * PILOT ACTIVATION — onboarding marks done and the paid pilot starts.
+ * Legacy stage value remains trial-active for storage compatibility.
  */
 export function executeTrialActivation(
   lead: Lead,
   performedBy: string,
   bridge: StoreBridge,
-  trialDays: number = 14,
+  trialDays: number = 30,
 ): ExecutionResult {
   if (lead.stage !== 'trial-proposed') {
-    return { success: false, lead, message: 'Cannot activate — not in Trial Proposed stage' };
+    return { success: false, lead, message: 'Cannot start pilot — not in Client Review stage' };
   }
-  if (!lead.approvedBy || !hasValidCredentials(lead)) {
-    return { success: false, lead, message: 'Cannot activate — approval or credentials missing' };
+  if (!lead.approvedBy || !hasValidCredentials(lead) || lead.paymentStatus !== 'paid') {
+    return { success: false, lead, message: 'Cannot start pilot — approval, payment, or credentials missing' };
   }
 
   const now = new Date();
@@ -516,13 +511,13 @@ export function executeTrialActivation(
   // Archive all setup tasks (using top-level import)
   let tasks = archiveStaleTasksForStage(lead.tasks || [], 'trial-active');
 
-  // Add Day 2 onboarding check-in
+  // Add pilot decision reminder.
   tasks = [...tasks, {
-    id: uid(), title: `Day 2 check-in — ${lead.companyName}`,
-    dueDate: new Date(now.getTime() + 2 * 86400000).toISOString(),
-    completed: false, assignedTo: 'muneeb', type: 'check-in' as const,
-    autoGenerated: true, createdAt: nowISO, priority: 'medium' as const,
-    reason: 'Trial just started — check if client is using the product',
+    id: uid(), title: `Pilot decision — ${lead.companyName}`,
+    dueDate: endDate.toISOString(),
+    completed: false, assignedTo: lead.assignedTo, type: 'conversion-push' as const,
+    autoGenerated: true, createdAt: nowISO, priority: 'high' as const,
+    reason: 'Pilot month complete — move to Contract or Closed Lost',
     stageFamily: 'trial',
   }];
 
@@ -531,12 +526,16 @@ export function executeTrialActivation(
     stage: 'trial-active',
     trialStartDate: nowISO,
     trialEndDate: endDate.toISOString(),
+    pilotStartDate: nowISO,
+    pilotEndDate: endDate.toISOString(),
+    onboardingDoneAt: lead.onboardingDoneAt || nowISO,
+    onboardingDoneBy: lead.onboardingDoneBy || performedBy,
     updatedAt: nowISO,
     lastContactedAt: nowISO,
     tasks,
     actionCompletions: [
       ...(lead.actionCompletions || []),
-      { id: uid(), action: 'Trial activated', completedAt: nowISO, completedBy: performedBy, channel: 'system' },
+      { id: uid(), action: 'Pilot started', completedAt: nowISO, completedBy: performedBy, channel: 'system' },
     ],
   };
 
@@ -546,15 +545,15 @@ export function executeTrialActivation(
   bridge.saveCompany(updated);
   bridge.addActivity({
     id: uid(), leadId: lead.id, type: 'action-completed',
-    description: `Trial activated for ${lead.companyName} (${trialDays} days)`,
+    description: `Pilot started for ${lead.companyName} (${trialDays} days)`,
     createdAt: nowISO, createdBy: performedBy,
   });
-  emitCRMEvent('trial_activated', performedBy, `Trial activated for ${lead.companyName} — ${trialDays} day trial starting now`, {
+  emitCRMEvent('trial_activated', performedBy, `Pilot started for ${lead.companyName} — ${trialDays} days`, {
     leadId: lead.id, companyName: lead.companyName, contactName: lead.contactName,
-    nextStep: 'Day 2 onboarding check-in scheduled',
+    nextStep: 'Pilot decision scheduled',
   });
 
-  return { success: true, lead: updated, nextAction: updated.nextAction, message: `Trial activated for ${lead.companyName} — ${trialDays} day trial starting now` };
+  return { success: true, lead: updated, nextAction: updated.nextAction, message: `Pilot started for ${lead.companyName}` };
 }
 
 /** Execute skip — requires reason, logs to timeline */

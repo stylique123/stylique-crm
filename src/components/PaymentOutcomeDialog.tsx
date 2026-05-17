@@ -6,12 +6,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckCircle, Clock, AlertTriangle, X } from 'lucide-react';
 import { getDealContext } from '@/engine/action-chain';
-import type { Lead } from '@/types/crm';
+import { PLAN_LABELS, type Currency, type Lead, type SubscriptionPlan } from '@/types/crm';
 import { cn } from '@/lib/utils';
 
 export type PaymentOutcome = 'paid' | 'reminder-sent' | 'requested-time' | 'lost';
+
+export interface PaymentConfirmationDetails {
+  paymentDate: string;
+  amount: number;
+  currency: Currency;
+  package: SubscriptionPlan;
+  note?: string;
+}
 
 const PAYMENT_OUTCOMES: { value: PaymentOutcome; label: string; icon: typeof CheckCircle; color: string }[] = [
   { value: 'paid', label: 'Confirm Payment', icon: CheckCircle, color: 'border-success/30 hover:border-success' },
@@ -26,7 +36,7 @@ interface PaymentOutcomeDialogProps {
   companyName: string;
   amount?: number;
   lead?: Lead | null;
-  onSubmit: (outcome: PaymentOutcome, notes: string) => void;
+  onSubmit: (outcome: PaymentOutcome, notes: string, details?: PaymentConfirmationDetails) => void;
 }
 
 export function PaymentOutcomeDialog({ open, onOpenChange, companyName, amount, lead, onSubmit }: PaymentOutcomeDialogProps) {
@@ -35,13 +45,31 @@ export function PaymentOutcomeDialog({ open, onOpenChange, companyName, amount, 
   const [submitting, setSubmitting] = useState(false);
 
   const dealCtx = useMemo(() => lead ? getDealContext(lead) : null, [lead]);
+  const initialAmount = lead?.active_value ?? lead?.proposed_value ?? amount ?? 0;
+  const initialCurrency = (lead?.active_currency ?? lead?.proposed_currency ?? 'USD') as Currency;
+  const initialPackage = (lead?.active_package ?? lead?.proposed_package ?? lead?.subscriptionPlan ?? 'starter') as SubscriptionPlan;
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentAmount, setPaymentAmount] = useState(() => String(initialAmount || ''));
+  const [currency, setCurrency] = useState<Currency>(initialCurrency);
+  const [plan, setPlan] = useState<SubscriptionPlan>(initialPackage);
+  const [paymentNote, setPaymentNote] = useState('');
 
   const handleSubmit = () => {
     if (!selected || submitting) return;
     setSubmitting(true);
-    onSubmit(selected, notes);
+    const details = selected === 'paid'
+      ? {
+        paymentDate,
+        amount: Number(paymentAmount) || 0,
+        currency,
+        package: plan,
+        note: paymentNote.trim() || undefined,
+      }
+      : undefined;
+    onSubmit(selected, notes, details);
     setSelected(null);
     setNotes('');
+    setPaymentNote('');
     setSubmitting(false);
   };
 
@@ -86,6 +114,45 @@ export function PaymentOutcomeDialog({ open, onOpenChange, companyName, amount, 
               );
             })}
           </div>
+
+          {selected === 'paid' && (
+            <div className="grid grid-cols-2 gap-3 rounded-lg border border-border/60 p-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Payment date</Label>
+                <Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Amount</Label>
+                <Input inputMode="decimal" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Currency</Label>
+                <Select value={currency} onValueChange={value => setCurrency(value as Currency)}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(['PKR', 'USD', 'GBP', 'AED'] as Currency[]).map(value => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Package</Label>
+                <Select value={plan} onValueChange={value => setPlan(value as SubscriptionPlan)}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PLAN_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5 col-span-2">
+                <Label className="text-xs text-muted-foreground">Payment note</Label>
+                <Input value={paymentNote} onChange={e => setPaymentNote(e.target.value)} placeholder="Optional" className="h-8 text-xs" />
+              </div>
+            </div>
+          )}
 
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</Label>

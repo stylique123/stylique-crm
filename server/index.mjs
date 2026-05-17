@@ -13,6 +13,11 @@ const ADMIN_PASSWORD = process.env.STYLIQUE_ADMIN_PASSWORD || '';
 const ALLOWED_ORIGIN = process.env.STYLIQUE_ALLOWED_ORIGIN || '*';
 const MAX_BODY_BYTES = Number(process.env.STYLIQUE_MAX_BODY_BYTES || 1024 * 1024);
 const CONNECTOR_TIMEOUT_MS = Number(process.env.STYLIQUE_CONNECTOR_TIMEOUT_MS || 15000);
+const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID || '';
+const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
+const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || '';
+const MICROSOFT_CALENDAR_USER_ID = process.env.MICROSOFT_CALENDAR_USER_ID || '';
+const MICROSOFT_DEFAULT_TIMEZONE = process.env.MICROSOFT_DEFAULT_TIMEZONE || 'Asia/Karachi';
 const LOGIN_WINDOW_MS = 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const CONNECTOR_WINDOW_MS = 60 * 1000;
@@ -45,6 +50,8 @@ const CONNECTORS = {
   },
 };
 
+let graphTokenCache = { token: '', expiresAt: 0 };
+
 const STATE_BUCKETS = new Set([
   'leads',
   'activities',
@@ -55,6 +62,9 @@ const STATE_BUCKETS = new Set([
   'leave-requests',
   'package-pricing',
 ]);
+
+const SDR_OWNED_BUCKETS = new Set(['leads', 'activities', 'attendance', 'kpi-actions', 'leave-requests']);
+const ONBOARDING_BUCKETS = new Set(['leads', 'activities', 'attendance', 'leave-requests']);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -82,7 +92,7 @@ function send(res, status, body, headers = {}) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': headers['Access-Control-Allow-Origin'] || '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, OPTIONS',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
@@ -132,6 +142,154 @@ function getUsers() {
   } catch {
     return {};
   }
+}
+
+function canAccessBucket(user, bucket, method) {
+  const role = String(user?.role || '');
+  if (role === 'ceo' || role === 'coo') return true;
+  if (role === 'sdr') return method === 'GET' && SDR_OWNED_BUCKETS.has(bucket);
+  if (role === 'onboarding') return method === 'GET' && ONBOARDING_BUCKETS.has(bucket);
+  return false;
+}
+
+function normalizeBrandName(value = '') {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function safeId(prefix = 'crm') {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function contactAlreadyExists(contacts = [], email = '', name = '') {
+  const e = String(email || '').trim().toLowerCase();
+  const n = String(name || '').trim().toLowerCase();
+  return contacts.some(c =>
+    (e && String(c.email || '').toLowerCase() === e) ||
+    (n && String(c.name || '').trim().toLowerCase() === n)
+  );
+}
+
+async function ingestBookDemo(body, user) {
+  const companyName = String(body.companyName || body.company || body.brand || '').trim();
+  const contactName = String(body.contactName || body.name || '').trim();
+  const contactEmail = String(body.contactEmail || body.email || '').trim();
+  if (!companyName || !contactName || !contactEmail) {
+    return { status: 400, body: { ok: false, error: 'companyName, contactName, and contactEmail are required' } };
+  }
+
+  const now = new Date().toISOString();
+  const owner = String(body.owner || user.sub || '').trim() || 'abdullah';
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  const existing = leads.find(lead => normalizeBrandName(lead.companyName) === normalizeBrandName(companyName));
+
+  if (existing) {
+    const baseContacts = Array.isArray(existing.contacts) && existing.contacts.length
+      ? existing.contacts
+      : [{
+          id: safeId('contact'),
+          name: existing.contactName,
+          email: existing.contactEmail,
+          phone: existing.contactPhone,
+          linkedin: existing.linkedin,
+          instagram: existing.instagram,
+          reached: false,
+        }];
+    const contact = {
+      id: safeId('contact'),
+      name: contactName,
+      email: contactEmail,
+      phone: String(body.contactPhone || body.phone || '').trim() || undefined,
+      reached: false,
+    };
+    const contacts = contactAlreadyExists(baseContacts, contact.email, contact.name) ? baseContacts : [...baseContacts, contact];
+    Object.assign(existing, {
+      contacts,
+      secondaryContact: existing.secondaryContact || contacts[1] ? {
+        name: contacts[1]?.name || existing.secondaryContact?.name || '',
+        email: contacts[1]?.email || existing.secondaryContact?.email,
+        phone: contacts[1]?.phone || existing.secondaryContact?.phone,
+      } : existing.secondaryContact,
+      source_detail: 'website_demo',
+      inbound_type: 'direct_book_demo',
+      updatedAt: now,
+      notes: [existing.notes, body.note ? `[Book demo] ${String(body.note).trim()}` : 'Book demo request'].filter(Boolean).join('\n'),
+    });
+    activities.unshift({
+      id: safeId('activity'),
+      leadId: existing.id,
+      type: 'stage-change',
+      description: 'Book-a-demo contact merged into brand',
+      createdAt: now,
+      createdBy: user.sub,
+    });
+    await writeBucket('leads', leads);
+    await writeBucket('activities', activities.slice(0, 500));
+    return { status: 200, body: { ok: true, leadId: existing.id, merged: true } };
+  }
+
+  const lead = {
+    id: safeId('lead'),
+    companyName,
+    contactName,
+    contactEmail,
+    contactPhone: String(body.contactPhone || body.phone || '').trim() || undefined,
+    website: String(body.website || '').trim() || undefined,
+    contacts: [{
+      id: safeId('contact'),
+      name: contactName,
+      email: contactEmail,
+      phone: String(body.contactPhone || body.phone || '').trim() || undefined,
+      reached: false,
+    }],
+    contactsReachedCount: 0,
+    pipeline: 'inbound',
+    stage: 'inbound-new',
+    assignedTo: owner,
+    platform: String(body.platform || 'shopify'),
+    entry_flow: 'inbound',
+    inbound_type: 'direct_book_demo',
+    source_detail: 'website_demo',
+    action_owner: 'sdr',
+    record_owner: owner,
+    assigned_sdr: owner,
+    notes: [String(body.note || '').trim(), 'Secondary contact missing'].filter(Boolean).join('\n'),
+    createdAt: now,
+    updatedAt: now,
+    tasks: [{
+      id: safeId('task'),
+      title: 'Secondary contact missing',
+      dueDate: now,
+      completed: false,
+      assignedTo: owner,
+      type: 'outreach',
+      autoGenerated: true,
+      createdAt: now,
+      priority: 'medium',
+      reason: 'Book-a-demo brand has one contact',
+      stageFamily: 'sdr',
+    }],
+    priority: 'medium',
+    leadKey: normalizeBrandName(companyName),
+  };
+  leads.push(lead);
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: 'stage-change',
+    description: `Book-a-demo inbound created — ${companyName}`,
+    createdAt: now,
+    createdBy: user.sub,
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: 201, body: { ok: true, leadId: lead.id, merged: false } };
 }
 
 function base64Url(input) {
@@ -193,7 +351,7 @@ async function writeBucket(bucket, data) {
 }
 
 async function serveStatic(req, res, pathname, corsHeaders) {
-  if (req.method !== 'GET') return false;
+  if (!['GET', 'HEAD'].includes(req.method)) return false;
   const requested = pathname === '/' ? '/index.html' : pathname;
   const normalized = path.normalize(decodeURIComponent(requested)).replace(/^(\.\.[/\\])+/, '');
   const target = path.join(STATIC_DIR, normalized);
@@ -210,7 +368,7 @@ async function serveStatic(req, res, pathname, corsHeaders) {
       'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=31536000, immutable',
       ...corsHeaders,
     });
-    res.end(data);
+    res.end(req.method === 'HEAD' ? undefined : data);
     return true;
   } catch {
     if (requested.startsWith('/api/') || requested.startsWith('/auth/') || requested === '/health') return false;
@@ -224,7 +382,7 @@ async function serveStatic(req, res, pathname, corsHeaders) {
         'Cache-Control': 'no-store',
         ...corsHeaders,
       });
-      res.end(data);
+      res.end(req.method === 'HEAD' ? undefined : data);
       return true;
     } catch {
       return false;
@@ -264,6 +422,101 @@ async function proxyConnector(key, payload, mode = 'invoke') {
   return { status: response.ok ? 200 : response.status, body: { ok: response.ok, connector: key, data: parsed } };
 }
 
+function microsoftConfigured() {
+  return Boolean(MICROSOFT_TENANT_ID && MICROSOFT_CLIENT_ID && MICROSOFT_CLIENT_SECRET && MICROSOFT_CALENDAR_USER_ID);
+}
+
+async function getMicrosoftGraphToken() {
+  if (!microsoftConfigured()) {
+    const error = new Error('Microsoft Graph is not configured');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (graphTokenCache.token && Date.now() < graphTokenCache.expiresAt - 60000) {
+    return graphTokenCache.token;
+  }
+  const body = new URLSearchParams({
+    client_id: MICROSOFT_CLIENT_ID,
+    client_secret: MICROSOFT_CLIENT_SECRET,
+    scope: 'https://graph.microsoft.com/.default',
+    grant_type: 'client_credentials',
+  });
+  const response = await fetch(`https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error_description || data.error || 'Microsoft token request failed');
+    error.statusCode = response.status;
+    throw error;
+  }
+  graphTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000,
+  };
+  return graphTokenCache.token;
+}
+
+async function createMicrosoftCalendarEvent(payload) {
+  const token = await getMicrosoftGraphToken();
+  const start = new Date(payload.startTime || payload.dateTime || payload.scheduled_at);
+  if (!Number.isFinite(start.getTime())) {
+    return { status: 400, body: { ok: false, error: 'Valid startTime is required' } };
+  }
+  const durationMinutes = Number(payload.durationMinutes || 30);
+  const end = new Date(start.getTime() + durationMinutes * 60000);
+  const timeZone = String(payload.timeZone || MICROSOFT_DEFAULT_TIMEZONE);
+  const attendees = Array.isArray(payload.attendees) ? payload.attendees : [];
+  const eventBody = {
+    subject: String(payload.subject || 'Stylique CRM meeting'),
+    body: {
+      contentType: 'HTML',
+      content: String(payload.notes || payload.body || 'Scheduled from Stylique CRM'),
+    },
+    start: { dateTime: start.toISOString(), timeZone },
+    end: { dateTime: end.toISOString(), timeZone },
+    attendees: attendees
+      .filter(a => a?.email || a?.address || typeof a === 'string')
+      .map(a => {
+        const address = typeof a === 'string' ? a : a.email || a.address;
+        const name = typeof a === 'string' ? a : a.name || address;
+        return { emailAddress: { address, name }, type: 'required' };
+      }),
+    isOnlineMeeting: true,
+    onlineMeetingProvider: 'teamsForBusiness',
+  };
+  const response = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(MICROSOFT_CALENDAR_USER_ID)}/events`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Prefer: `outlook.timezone="${timeZone}"`,
+    },
+    body: JSON.stringify(eventBody),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { status: response.status, body: { ok: false, error: data.error?.message || 'Microsoft event create failed', data } };
+  }
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      provider: 'microsoft',
+      eventId: data.id,
+      joinUrl: data.onlineMeeting?.joinUrl || data.onlineMeetingUrl || '',
+      webLink: data.webLink || '',
+      raw: {
+        id: data.id,
+        isOnlineMeeting: data.isOnlineMeeting,
+        onlineMeetingProvider: data.onlineMeetingProvider,
+      },
+    },
+  };
+}
+
 async function router(req, res) {
   const corsOrigin = getCorsOrigin(req);
   if (!corsOrigin && req.headers.origin) {
@@ -291,6 +544,13 @@ async function router(req, res) {
         key,
         { configured: Boolean(cfg.url && cfg.key), endpoint: Boolean(cfg.url), key: Boolean(cfg.key) },
       ])),
+      microsoft: {
+        configured: microsoftConfigured(),
+        tenant: Boolean(MICROSOFT_TENANT_ID),
+        clientId: Boolean(MICROSOFT_CLIENT_ID),
+        clientSecret: Boolean(MICROSOFT_CLIENT_SECRET),
+        calendarUser: Boolean(MICROSOFT_CALENDAR_USER_ID),
+      },
     }, corsHeaders);
   }
 
@@ -321,15 +581,51 @@ async function router(req, res) {
 
   const stateMatch = pathname.match(/^\/api\/state\/([a-z0-9-]+)$/);
   if (stateMatch && req.method === 'GET') {
+    if (!canAccessBucket(user, stateMatch[1], req.method)) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
     const data = await readBucket(stateMatch[1]);
     if (data === null) return send(res, 404, { ok: false, error: 'Unknown state bucket' }, corsHeaders);
     return send(res, 200, { ok: true, data }, corsHeaders);
   }
   if (stateMatch && req.method === 'PUT') {
+    if (!canAccessBucket(user, stateMatch[1], req.method)) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
     const body = await readBody(req);
     const ok = await writeBucket(stateMatch[1], body.data ?? body);
     if (!ok) return send(res, 404, { ok: false, error: 'Unknown state bucket' }, corsHeaders);
     return send(res, 200, { ok: true }, corsHeaders);
+  }
+
+  if (pathname === '/api/book-demo' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
+    const result = await ingestBookDemo(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/calendar/microsoft/health' && req.method === 'GET') {
+    return send(res, 200, {
+      ok: true,
+      configured: microsoftConfigured(),
+      tenant: Boolean(MICROSOFT_TENANT_ID),
+      clientId: Boolean(MICROSOFT_CLIENT_ID),
+      clientSecret: Boolean(MICROSOFT_CLIENT_SECRET),
+      calendarUser: Boolean(MICROSOFT_CALENDAR_USER_ID),
+      timeZone: MICROSOFT_DEFAULT_TIMEZONE,
+    }, corsHeaders);
+  }
+
+  if (pathname === '/api/calendar/microsoft/events' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) {
+      return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    }
+    const result = await createMicrosoftCalendarEvent(await readBody(req));
+    return send(res, result.status, result.body, corsHeaders);
   }
 
   const connectorMatch = pathname.match(/^\/api\/connectors\/(claude|codex|clort|botex)\/(ping|invoke)$/);

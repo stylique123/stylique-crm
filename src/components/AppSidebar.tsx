@@ -4,8 +4,8 @@
  */
 import {
   LayoutDashboard, Users, Calendar,
-  GitBranch, KeyRound,
-  Building2, Settings as SettingsIcon,
+  GitBranch, ClipboardCheck,
+  Building2, Settings as SettingsIcon, CreditCard, Clock,
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useUser } from '@/lib/user-context';
@@ -24,9 +24,11 @@ function getNavItems(role: string): { main: NavItem[]; more: NavItem[] } {
         main: [
           { title: 'Command Center', url: '/dashboard', icon: LayoutDashboard },
           { title: 'Clients', url: '/clients', icon: Building2 },
+          { title: 'Payments', url: '/payments', icon: CreditCard },
           { title: 'Pipeline', url: '/pipeline', icon: GitBranch },
           { title: 'Contacts', url: '/contacts', icon: Users },
           { title: 'Calendar', url: '/calendar', icon: Calendar },
+          { title: 'Attendance', url: '/team', icon: Clock },
         ],
         more: [
           { title: 'Settings', url: '/admin', icon: SettingsIcon },
@@ -36,10 +38,9 @@ function getNavItems(role: string): { main: NavItem[]; more: NavItem[] } {
       // Onboarding workspace — client activation only.
       return {
         main: [
-          { title: 'Awaiting Credentials', url: '/clients#credentials', icon: KeyRound },
-          { title: 'Onboarding Queue', url: '/clients#queue', icon: Building2 },
+          { title: 'Onboarding Tasks', url: '/clients#queue', icon: ClipboardCheck },
           { title: 'Active Clients', url: '/clients#active', icon: Building2 },
-          { title: 'Contacts', url: '/contacts', icon: Users },
+          { title: 'Client Contacts', url: '/contacts', icon: Users },
         ],
         more: [],
       };
@@ -52,6 +53,7 @@ function getNavItems(role: string): { main: NavItem[]; more: NavItem[] } {
           { title: 'Clients', url: '/clients', icon: Building2 },
           { title: 'Contacts', url: '/contacts', icon: Users },
           { title: 'Calendar', url: '/calendar', icon: Calendar },
+          { title: 'Attendance', url: '/team', icon: Clock },
         ],
         more: [],
       };

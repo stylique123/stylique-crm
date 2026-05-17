@@ -83,6 +83,39 @@ CONNECTOR_BOTEX_URL=
 CONNECTOR_BOTEX_API_KEY=
 ```
 
+## Microsoft Outlook / Teams Calendar
+
+The CRM uses Microsoft Graph through the backend. Browser users never receive
+Microsoft secrets.
+
+Create an Azure app registration and configure:
+
+```bash
+MICROSOFT_TENANT_ID=
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+MICROSOFT_CALENDAR_USER_ID=calendar-owner@yourdomain.com
+MICROSOFT_DEFAULT_TIMEZONE=Asia/Karachi
+```
+
+Required Microsoft Graph application permission:
+
+```text
+Calendars.ReadWrite
+```
+
+Admin consent is required. The CRM creates calendar-backed Teams meetings by
+posting an Outlook event with `isOnlineMeeting=true` and
+`onlineMeetingProvider=teamsForBusiness`, which is the Microsoft-recommended
+path when the meeting should appear on the calendar.
+
+Check config:
+
+```bash
+curl https://your-api-host/api/calendar/microsoft/health \
+  -H "Authorization: Bearer <crm-token>"
+```
+
 ## Health Check
 
 ```bash

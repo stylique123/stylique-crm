@@ -35,16 +35,13 @@ const AI_STAGE_MIGRATION: Record<string, string> = {
   'outreach-2': 'sdr-contacted',
   'outreach-3': 'sdr-contacted',
   'awaiting-sdr': 'sdr-contacted',
-  // New simplified model — collapse old trial/decision/pricing stages.
-  // 'meeting-completed' kept as-is (semantically = Conversion Pending).
-  // 'trial-proposed' / 'internal-decision' / 'pricing-discussion' →
-  //   meeting-completed (Conversion Pending awaiting commercial decision).
-  // 'trial-active' → payment-pending (Awaiting Payment) since trials are
-  //   no longer a standalone lifecycle.
-  'trial-proposed': 'meeting-completed',
-  'internal-decision': 'meeting-completed',
-  'pricing-discussion': 'meeting-completed',
-  'trial-active': 'payment-pending',
+  // Preserve current commercial states. These used to collapse into old
+  // payment logic, which caused Pilot/Client Review records to appear in the
+  // wrong bucket after reload.
+  'internal-decision': 'internal-decision',
+  'pricing-discussion': 'pricing-discussion',
+  'trial-proposed': 'trial-proposed',
+  'trial-active': 'trial-active',
 };
 
 type PersistedLeadRecord = Omit<Partial<Lead>, 'pipeline' | 'entry_flow' | 'action_owner' | 'stage'> & {

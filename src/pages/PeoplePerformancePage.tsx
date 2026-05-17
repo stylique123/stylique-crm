@@ -30,7 +30,7 @@ import type { KPISnapshot, ActionKPIMetric } from '@/types/kpi';
 import { ACTION_KPI_LABELS } from '@/types/kpi';
 import { useCompanyStore } from '@/lib/company-store';
 import { getCanonicalState } from '@/engine/canonical-state';
-import { countMeetingsBookedThisWeek, countConversionsThisWeek } from '@/engine/event-kpi';
+import { countMeetingsBookedThisWeek, countConversionsThisWeek, countMeetingsBookedThisMonth, countConversionsThisMonth } from '@/engine/event-kpi';
 import {
   computeDayState, getLeaveBalanceLabel, getSalaryDisplay, formatTimestamp,
   DAY_STATE_COLORS, DAY_STATE_LABELS, type DayStateResult, type FinalDayState,
@@ -123,8 +123,8 @@ function SDRProfileDrawer({ employeeId, open, onOpenChange }: { employeeId: stri
   const wb = computeWeeklyBrandKPI(employeeId, weekLeaveDates);
   const ownedLeads = companies.filter(c => c.assignedTo === employeeId || c.assigned_sdr === employeeId);
   // Event-based weekly counts — survive lifecycle progression past meeting/converted state.
-  const meetingsBooked = countMeetingsBookedThisWeek(ownedLeads, employeeId);
-  const conversions = countConversionsThisWeek(ownedLeads, activities, employeeId);
+  const meetingsBooked = countMeetingsBookedThisMonth(ownedLeads, employeeId);
+  const conversions = countConversionsThisMonth(ownedLeads, activities, employeeId);
   const balanceLabel = getLeaveBalanceLabel(emp.leaveRemaining, emp.annualLeaveAllowance, emp.employmentStatus === 'probationary', policy?.probationMode);
 
   return (
@@ -160,9 +160,9 @@ function SDRProfileDrawer({ employeeId, open, onOpenChange }: { employeeId: stri
               <p className="text-[9px] text-muted-foreground mt-1 leading-relaxed">{wb.guidanceMessage}</p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center mt-1">
-              <div><p className="text-sm font-bold">{meetingsBooked}</p><p className="text-[9px] text-muted-foreground">Meetings</p></div>
+              <div><p className="text-sm font-bold">{meetingsBooked}</p><p className="text-[9px] text-muted-foreground">Meetings MTD</p></div>
               <div><p className="text-sm font-bold">{Math.ceil(wb.requiredPacePerDay)}/day</p><p className="text-[9px] text-muted-foreground">{wb.daysRemaining}d left</p></div>
-              <div><p className="text-sm font-bold text-primary">{conversions}</p><p className="text-[9px] text-muted-foreground">Conversions</p></div>
+              <div><p className="text-sm font-bold text-primary">{conversions}</p><p className="text-[9px] text-muted-foreground">Conversions MTD</p></div>
             </div>
           </div>
           {/* Leave */}
@@ -697,8 +697,8 @@ function KPITab() {
   const activeKPIs = kpiDefs.getActive('sdr');
   const weeklyScoreValue = (code: string) => {
     const ownedLeads = companies.filter(c => c.assignedTo === selectedSdr || c.assigned_sdr === selectedSdr);
-    if (code === 'meetings_booked') return countMeetingsBookedThisWeek(ownedLeads, selectedSdr);
-    if (code === 'conversions') return countConversionsThisWeek(ownedLeads, activities, selectedSdr);
+    if (code === 'meetings_booked') return countMeetingsBookedThisMonth(ownedLeads, selectedSdr);
+    if (code === 'conversions') return countConversionsThisMonth(ownedLeads, activities, selectedSdr);
     const metricKey = code as keyof typeof weeklySnap.actions;
     return weeklySnap.actions[metricKey] ?? 0;
   };
@@ -773,7 +773,7 @@ function KPITab() {
             if (otherKPIs.length === 0) return null;
             return (
               <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">Weekly Targets</h4>
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">Monthly Targets</h4>
                 <div className="grid grid-cols-2 gap-2">
                   {otherKPIs.map(kpi => {
                     const target = getEffectiveTarget(kpi, selectedSdr);
@@ -782,7 +782,7 @@ function KPITab() {
                     return (
                       <Card key={kpi.id}><CardContent className="py-2.5 px-3">
                         <p className="text-[10px] text-muted-foreground">{kpi.name}</p>
-                        <div className="flex items-baseline gap-1 mt-0.5"><span className="text-lg font-bold">{actual}</span><span className="text-xs text-muted-foreground">/ {target}/wk</span></div>
+                        <div className="flex items-baseline gap-1 mt-0.5"><span className="text-lg font-bold">{actual}</span><span className="text-xs text-muted-foreground">/ {target}/mo</span></div>
                         <Progress value={pct} className="h-1 mt-1" />
                       </CardContent></Card>
                     );

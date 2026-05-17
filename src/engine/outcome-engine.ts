@@ -291,7 +291,7 @@ export function processMeetingOutcome(
     case 'interested':
       result = {
         nextStepDescription: nextStep || `Follow up with ${lead.contactName} on discussed items`,
-        stageChange: 'meeting-completed',
+        stageChange: 'internal-decision',
         task: {
           title: nextStep || `Follow up — ${lead.companyName} interested, propose trial or next steps`,
           dueDate: tomorrow,
@@ -310,7 +310,7 @@ export function processMeetingOutcome(
     case 'followup_later':
       result = {
         nextStepDescription: nextStep || `Follow up with ${lead.contactName} later`,
-        stageChange: 'meeting-completed',
+        stageChange: 'internal-decision',
         task: {
           title: nextStep || `Follow up with ${lead.contactName} — reconnect`,
           dueDate: nextStepDate || in2Days,
@@ -329,6 +329,7 @@ export function processMeetingOutcome(
     case 'reschedule':
       result = {
         nextStepDescription: `Meeting rescheduled — prepare again when new date set`,
+        stageChange: 'meeting-booked',
         task: {
           title: `Confirm rescheduled meeting — ${lead.companyName}`,
           dueDate: in2Days,
@@ -347,6 +348,7 @@ export function processMeetingOutcome(
     case 'no_show':
       result = {
         nextStepDescription: `No-show — call or email ${lead.contactName} now`,
+        stageChange: 'meeting-booked',
         task: {
           title: `Follow up now — ${lead.contactName} was a no-show`,
           dueDate: new Date().toISOString(),
@@ -416,14 +418,76 @@ export function processMeetingOutcome(
       };
   }
 
-  // Update meeting notes
+  // Update canonical meeting + legacy meeting notes so the drawer is the
+  // single visible truth for what happened in meetings.
   const updated = { ...lead };
+  const canonicalStatus =
+    outcome === 'reschedule' ? 'rescheduled' :
+    outcome === 'no_show' ? 'no_show' :
+    'completed';
+  if (updated.meetings?.length) {
+    const idx = updated.meetings
+      .map((m, i) => ({ m, i }))
+      .filter(x => x.m.status === 'scheduled' || x.m.status === 'rescheduled')
+      .sort((a, b) => new Date(b.m.scheduled_at).getTime() - new Date(a.m.scheduled_at).getTime())[0]?.i
+      ?? updated.meetings.length - 1;
+    const current = updated.meetings[idx];
+    updated.meetings = updated.meetings.map((m, i) => i === idx ? {
+      ...m,
+      status: canonicalStatus,
+      outcome,
+      summary,
+      notes: summary,
+      next_step: nextStep,
+      next_step_date: nextStepDate,
+      updated_at: new Date().toISOString(),
+    } : m);
+    if (outcome === 'reschedule' && nextStepDate) {
+      updated.meetings = [...updated.meetings, {
+        meeting_id: crypto.randomUUID(),
+        lead_id: lead.id,
+        lead_key: lead.leadKey,
+        owner: lead.assignedTo,
+        source_flow: lead.entry_flow || (lead.pipeline === 'inbound' ? 'inbound' : 'sdr_manual'),
+        meeting_type: current?.meeting_type || 'other',
+        meeting_source: current?.meeting_source || 'sdr_booked',
+        scheduled_at: nextStepDate,
+        meeting_link: current?.meeting_link || '',
+        status: 'scheduled',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        sync_status: 'not_configured',
+      }];
+    }
+  }
   if (updated.meetingNotes?.length) {
     const lastMeeting = { ...updated.meetingNotes[updated.meetingNotes.length - 1] };
     lastMeeting.summary = summary;
     lastMeeting.outcome = outcome;
     lastMeeting.nextStep = nextStep;
     updated.meetingNotes = [...updated.meetingNotes.slice(0, -1), lastMeeting];
+    if (outcome === 'reschedule' && nextStepDate) {
+      updated.meetingNotes = [...updated.meetingNotes, {
+        id: crypto.randomUUID(),
+        date: nextStepDate,
+        type: lastMeeting.type || 'other',
+        link: lastMeeting.link,
+        summary: '',
+        attendees: [lead.contactName],
+        actionItems: [],
+      }];
+    }
+  } else {
+    updated.meetingNotes = [{
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      type: 'other',
+      summary,
+      outcome,
+      nextStep,
+      attendees: [lead.contactName],
+      actionItems: [],
+    }];
   }
 
   applyOutcomeResult(updated, result, performedBy, `Meeting: ${outcome}`, 'meeting', summary, bridge);
@@ -432,11 +496,6 @@ export function processMeetingOutcome(
   if (outcome === 'propose_trial') {
     emitKPI(performedBy, lead, lead.contactName, 'trials_proposed', 'meeting', outcome);
   }
-  // Every meeting completion counts
-  if (['interested', 'propose_trial', 'followup_later', 'pending_internal', 'pricing_discussion', 'not_fit', 'lost'].includes(outcome)) {
-    emitKPI(performedBy, lead, lead.contactName, 'meetings_booked', 'meeting', outcome);
-  }
-
   return result;
 }
 
@@ -569,20 +628,9 @@ export function processTaskOutcome(
     switch (outcome) {
       case 'interested':
         result = {
-          nextStepDescription: `${lead.contactName} wants to convert — send payment details`,
-          stageChange: 'payment-pending',
-          task: {
-            title: `Send payment details to ${lead.contactName}`,
-            dueDate: new Date().toISOString(),
-            completed: false,
-            assignedTo: lead.assignedTo,
-            type: 'payment',
-            autoGenerated: true,
-            priority: 'critical',
-            reason: 'Client ready to pay — send details now',
-            stageFamily: 'payment',
-          },
-          activityDescription: `🎯 ${lead.contactName} interested in converting`,
+          nextStepDescription: `${lead.companyName} moved to Contract`,
+          stageChange: 'converted',
+          activityDescription: `Contract signed — ${lead.companyName}`,
         };
         break;
       case 'not-now':
@@ -668,6 +716,24 @@ export function processTaskOutcome(
 
   // Complete the specific task FIRST
   const updated = { ...lead };
+  if ((taskType === 'conversion-push' || taskType === 'trial-end') && outcome === 'interested') {
+    const now = new Date().toISOString();
+    updated.pilotDecision = 'contract';
+    updated.pilotDecisionAt = now;
+    updated.pilotDecisionBy = performedBy;
+    updated.contractSignedAt = now;
+    updated.contractStartDate = now;
+    const contractEnd = new Date(now);
+    contractEnd.setMonth(contractEnd.getMonth() + 3);
+    updated.contractEndDate = contractEnd.toISOString();
+    updated.subscriptionStatus = 'active';
+  }
+  if ((taskType === 'conversion-push' || taskType === 'trial-end') && outcome === 'lost') {
+    const now = new Date().toISOString();
+    updated.pilotDecision = 'lost';
+    updated.pilotDecisionAt = now;
+    updated.pilotDecisionBy = performedBy;
+  }
   if (taskId) {
     updated.tasks = (updated.tasks || []).map(t =>
       t.id === taskId
@@ -690,6 +756,7 @@ export function processPaymentOutcome(
   notes: string,
   performedBy: string,
   bridge: StoreBridge,
+  paymentDate?: string,
 ): OutcomeResult {
   const in3Days = new Date(Date.now() + 3 * 86400000).toISOString();
 
@@ -698,9 +765,9 @@ export function processPaymentOutcome(
   switch (outcome) {
     case 'paid':
       result = {
-        nextStepDescription: `${lead.companyName} is now a paying client!`,
-        stageChange: 'converted',
-        activityDescription: `💰 Payment received — ${lead.companyName} converted to client`,
+        nextStepDescription: `${lead.companyName} payment verified — add credentials`,
+        stageChange: 'trial-proposed',
+        activityDescription: `Payment verified — ${lead.companyName} ready for credentials/onboarding`,
       };
       break;
     case 'reminder-sent':
@@ -757,8 +824,10 @@ export function processPaymentOutcome(
     // Drive monthly billing through the first-class ledger.
     // confirmPaymentAndRoll: marks current entry paid, creates next month
     // entry, advances nextPaymentDate, promotes proposed → active deal.
-    const rolled = confirmPaymentAndRoll(updated, performedBy, undefined, notes);
+    const rolled = confirmPaymentAndRoll(updated, performedBy, undefined, notes, paymentDate);
     Object.assign(updated, rolled);
+    updated.paymentVerifiedAt = paymentDate || new Date().toISOString();
+    updated.paymentVerifiedBy = performedBy;
   } else if (outcome === 'reminder-sent') {
     updated.lastContactedAt = new Date().toISOString();
   }

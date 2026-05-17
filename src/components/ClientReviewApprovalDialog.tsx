@@ -3,7 +3,7 @@
  * for records that SDR moved to Client Review (stage = trial-proposed).
  *
  * Outcomes:
- *   • approve   → set proposed_* deal fields + stage='payment-pending'
+ *   • approve   → set proposed_* deal fields; stays in Client Review for payment/credentials
  *   • reject    → stage='closed-lost'
  *   • send_back → stage='meeting-completed' with reason note
  */
@@ -35,7 +35,7 @@ interface Props {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   lead: Lead | null;
-  onDone?: () => void;
+  onDone?: (lead: Lead, mode: Mode) => void;
 }
 
 const PLANS: SubscriptionPlan[] = ['lite', 'starter', 'growth', 'enterprise', 'custom'];
@@ -64,15 +64,18 @@ export function ClientReviewApprovalDialog({ open, onOpenChange, lead, onDone }:
     if (mode === 'approve') {
       if (!value || value <= 0) { toast.error('Set a deal value above 0'); return; }
       next = {
-        stage: 'payment-pending',
+        stage: 'trial-proposed',
         proposed_package: pkg,
         proposed_currency: currency,
         proposed_value: value,
         approvedBy: currentUser,
+        clientReviewApprovedAt: now,
+        clientReviewApprovedBy: currentUser,
+        paymentStatus: 'pending',
         updatedAt: now,
       };
       activity = `✅ Client review approved by ${userName} — ${PLAN_LABELS[pkg]} ${currency} ${value}/mo${notes ? ` · ${notes}` : ''}`;
-      toast.success(`${lead.companyName} → Awaiting Payment`);
+      toast.success(`${lead.companyName} approved — verify payment next`);
     } else if (mode === 'reject') {
       next = {
         stage: 'closed-lost',
@@ -104,7 +107,7 @@ export function ClientReviewApprovalDialog({ open, onOpenChange, lead, onDone }:
     });
     reset();
     onOpenChange(false);
-    onDone?.();
+    onDone?.({ ...lead, ...next } as Lead, mode);
   };
 
   return (
@@ -179,7 +182,7 @@ export function ClientReviewApprovalDialog({ open, onOpenChange, lead, onDone }:
             onClick={submit}
             disabled={mode !== 'approve' && !notes.trim()}
           >
-            {mode === 'approve' ? 'Approve → Awaiting Payment' :
+            {mode === 'approve' ? 'Approve Review' :
              mode === 'reject' ? 'Mark Closed Lost' : 'Send back to SDR'}
           </Button>
         </DialogFooter>

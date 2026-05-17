@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useCompanyStore } from '@/lib/company-store';
-import { Lead, TEAM_MEMBERS, PLATFORM_LABELS, CONVERTED_STAGES } from '@/types/crm';
+import { Lead, TEAM_MEMBERS, PLATFORM_LABELS, CONVERTED_STAGES, hasValidCredentials } from '@/types/crm';
 import { BrandProgressInline } from '@/components/BrandProgressBadge';
 import {
   getCanonicalState, isActionableForRole,
@@ -18,11 +18,11 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Search, Building2, Inbox, UserCheck, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getLifecycleBucket } from '@/engine/post-trial';
+import { getCommercialState } from '@/engine/commercial-state';
 
-type ContactFilter = 'all' | 'active_leads' | 'meeting_stage' | 'cold' | 'clients' | 'closed';
-type OnboardingFilter = 'all' | 'trial_contacts' | 'activation_ready' | 'active_clients' | 'checkin_due';
-type OwnerFilter = 'mine' | 'all';
+type ContactFilter = 'all' | 'active_leads' | 'meeting_stage' | 'decision_pending' | 'cold' | 'clients' | 'closed';
+type LeadershipFilter = 'all' | 'active_leads' | 'client_review' | 'onboarding_queue' | 'active_clients' | 'pilot' | 'contract' | 'overdue' | 'history';
+type OnboardingFilter = 'all' | 'onboarding_queue' | 'active_clients';
 
 const FLOW_ICONS: Record<string, typeof Inbox> = {
   inbound: Inbox, sdr_manual: UserCheck,
@@ -31,6 +31,7 @@ const FLOW_ICONS: Record<string, typeof Inbox> = {
 function getLifecycleGroup(cs: CanonicalState): ContactFilter {
   if (['closed', 'lost', 'unsubscribed'].includes(cs.lifecycle_stage)) return 'closed';
   if (cs.lifecycle_stage === 'cold_no_response') return 'cold';
+  if (['internal_decision', 'pricing_discussion'].includes(cs.lifecycle_stage)) return 'decision_pending';
   // Clients: anything from Moved to Client Review onward.
   if (['trial_proposed', 'trial_ready', 'trial_active', 'conversion_pending', 'converted'].includes(cs.lifecycle_stage)) {
     return 'clients';
@@ -40,30 +41,30 @@ function getLifecycleGroup(cs: CanonicalState): ContactFilter {
   return 'active_leads';
 }
 
-/** Onboarding-specific bucket: which onboarding stage does this lead represent? */
-function getOnboardingGroup(lead: import('@/types/crm').Lead): OnboardingFilter {
-  // Drive bucketing from the canonical lifecycle bucket — never raw stage.
-  const bucket = getLifecycleBucket(lead);
-  if (bucket === 'trial_ready_to_start') return 'activation_ready';
-  if (bucket === 'trial_pending_approval' || bucket === 'trial_ready_to_start_blocked') return 'trial_contacts';
-  if (bucket === 'trial_active' || bucket === 'trial_ending_soon' || bucket === 'trial_ended_awaiting') {
-    // Check-in due if no recent check-in meeting in last 3 days
-    const recent = (lead.meetings || []).find(m =>
-      m.meeting_source === 'onboarding_checkin' &&
-      (Date.now() - new Date(m.scheduled_at).getTime()) < 3 * 86400000
-    );
-    return recent ? 'active_clients' : 'checkin_due';
-  }
-  if (bucket === 'converted' || bucket === 'payment_window_open') return 'active_clients';
-  return 'trial_contacts';
+function getLeadershipGroup(lead: Lead): LeadershipFilter {
+  const state = getCommercialState(lead);
+  if (state === 'conversion_pending' || state === 'client_review') return 'client_review';
+  if (state === 'onboarding_pending') return hasValidCredentials(lead) ? 'onboarding_queue' : 'client_review';
+  if (state === 'pilot') return 'pilot';
+  if (state === 'contract') return 'contract';
+  if (state === 'active_client' || state === 'payment_due_soon') return 'active_clients';
+  if (state === 'overdue') return 'overdue';
+  if (state === 'closed_lost' || state === 'closed') return 'history';
+  return 'active_leads';
+}
+
+function getOnboardingGroup(lead: Lead): OnboardingFilter {
+  const state = getCommercialState(lead);
+  if (state === 'onboarding_pending' && hasValidCredentials(lead)) return 'onboarding_queue';
+  if (state === 'active_client' || state === 'payment_due_soon' || state === 'pilot' || state === 'contract') return 'active_clients';
+  return 'onboarding_queue';
 }
 
 export default function ContactsPage() {
   const { companies: leads, refresh } = useCompanyStore();
   const [search, setSearch] = useState('');
-  const [filterStage, setFilterStage] = useState<ContactFilter>('all');
+  const [filterStage, setFilterStage] = useState<ContactFilter | LeadershipFilter>('all');
   const [onboardingTab, setOnboardingTab] = useState<OnboardingFilter>('all');
-  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('mine');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const { currentUser, isLeadership, isOnboarding, isSdr } = useUser();
 
@@ -72,30 +73,17 @@ export default function ContactsPage() {
   // Role-scoped contact visibility
   const baseLeads = useMemo(() => {
     if (isOnboarding) {
-      // Onboarding-relevant only:
-      //  • trials in any setup/active state (proposed, ready, blocked, active)
-      //  • payment-pending trials still owned by onboarding
-      //  • newly converted clients within onboarding window (14d)
-      //  • any record explicitly assigned to onboarding owner
-      const ONBOARDING_WINDOW_MS = 14 * 86400000;
       return leads.filter(l => {
         if (l.assigned_onboarding_owner === currentUser) return true;
-        const b = getLifecycleBucket(l);
-        if (b === 'trial_pending_approval' || b === 'trial_ready_to_start'
-            || b === 'trial_ready_to_start_blocked' || b === 'trial_active'
-            || b === 'trial_ending_soon' || b === 'trial_ended_awaiting'
-            || b === 'payment_window_open') return true;
-        if (b === 'converted' && l.paymentReceivedAt) {
-          const t = new Date(l.paymentReceivedAt).getTime();
-          if (Number.isFinite(t) && Date.now() - t <= ONBOARDING_WINDOW_MS) return true;
-        }
+        const state = getCommercialState(l);
+        if (state === 'onboarding_pending' && hasValidCredentials(l)) return true;
+        if (state === 'active_client' || state === 'payment_due_soon' || state === 'pilot' || state === 'contract') return true;
         return false;
       });
     }
     if (isLeadership) return leads;
-    if (ownerFilter === 'all') return leads;
     return leads.filter(l => l.assignedTo === currentUser || l.assigned_sdr === currentUser);
-  }, [leads, isSdr, isOnboarding, isLeadership, ownerFilter, currentUser]);
+  }, [leads, isOnboarding, isLeadership, currentUser]);
 
   const filtered = useMemo(() => {
     return baseLeads.filter(l => {
@@ -109,13 +97,14 @@ export default function ContactsPage() {
         return getOnboardingGroup(l) === onboardingTab;
       }
       if (filterStage === 'all') return true;
+      if (isLeadership) return getLeadershipGroup(l) === filterStage;
       const cs = getCanonicalState(l);
       return getLifecycleGroup(cs) === filterStage;
     }).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [baseLeads, search, filterStage, onboardingTab, isOnboarding]);
+  }, [baseLeads, search, filterStage, onboardingTab, isOnboarding, isLeadership]);
 
   const counts = useMemo(() => {
-    const c = { total: baseLeads.length, active_leads: 0, meeting_stage: 0, cold: 0, clients: 0, closed: 0 };
+    const c = { total: baseLeads.length, active_leads: 0, meeting_stage: 0, decision_pending: 0, cold: 0, clients: 0, closed: 0 };
     baseLeads.forEach(l => {
       const cs = getCanonicalState(l);
       const group = getLifecycleGroup(cs);
@@ -124,8 +113,14 @@ export default function ContactsPage() {
     return c;
   }, [baseLeads]);
 
+  const leadershipCounts = useMemo(() => {
+    const c = { all: baseLeads.length, active_leads: 0, client_review: 0, onboarding_queue: 0, active_clients: 0, pilot: 0, contract: 0, overdue: 0, history: 0 };
+    baseLeads.forEach(l => { c[getLeadershipGroup(l)]++; });
+    return c;
+  }, [baseLeads]);
+
   const onboardingCounts = useMemo(() => {
-    const c = { all: baseLeads.length, trial_contacts: 0, activation_ready: 0, active_clients: 0, checkin_due: 0 };
+    const c = { all: baseLeads.length, onboarding_queue: 0, active_clients: 0 };
     baseLeads.forEach(l => { c[getOnboardingGroup(l)]++; });
     return c;
   }, [baseLeads]);
@@ -136,22 +131,7 @@ export default function ContactsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Contacts</h1>
         </div>
-        {isSdr && (
-          <div className="flex gap-0.5 bg-secondary rounded-lg p-0.5">
-            <button
-              onClick={() => setOwnerFilter('mine')}
-              className={cn("px-3 py-1 text-xs rounded-md transition-colors", ownerFilter === 'mine' ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground')}
-            >
-              Mine
-            </button>
-            <button
-              onClick={() => setOwnerFilter('all')}
-              className={cn("px-3 py-1 text-xs rounded-md transition-colors", ownerFilter === 'all' ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground')}
-            >
-              All
-            </button>
-          </div>
-        )}
+        {isSdr && <Badge variant="outline" className="text-xs">Mine</Badge>}
       </div>
 
       {/* Filter tabs — onboarding gets its own scoped buckets */}
@@ -159,8 +139,8 @@ export default function ContactsPage() {
         <div className="flex gap-1 flex-wrap">
           {([
             { key: 'all' as const, label: 'All', count: onboardingCounts.all },
+            { key: 'onboarding_queue' as const, label: 'Onboarding Queue', count: onboardingCounts.onboarding_queue },
             { key: 'active_clients' as const, label: 'Active Clients', count: onboardingCounts.active_clients },
-            { key: 'checkin_due' as const, label: 'Check-in Due', count: onboardingCounts.checkin_due },
           ]).map(item => (
             <button
               key={item.key}
@@ -176,12 +156,40 @@ export default function ContactsPage() {
             </button>
           ))}
         </div>
+      ) : isLeadership ? (
+        <div className="flex gap-1 flex-wrap">
+          {([
+            { key: 'all' as const, label: 'All Contacts', count: leadershipCounts.all },
+            { key: 'active_leads' as const, label: 'Active Leads', count: leadershipCounts.active_leads },
+            { key: 'client_review' as const, label: 'Client Review', count: leadershipCounts.client_review },
+            { key: 'onboarding_queue' as const, label: 'Onboarding Queue', count: leadershipCounts.onboarding_queue },
+            { key: 'pilot' as const, label: 'Pilot', count: leadershipCounts.pilot },
+            { key: 'contract' as const, label: 'Contract', count: leadershipCounts.contract },
+            { key: 'active_clients' as const, label: 'Active Clients', count: leadershipCounts.active_clients },
+            { key: 'overdue' as const, label: 'Overdue', count: leadershipCounts.overdue },
+            { key: 'history' as const, label: 'History', count: leadershipCounts.history },
+          ]).map(item => (
+            <button
+              key={item.key}
+              onClick={() => setFilterStage(item.key)}
+              className={cn(
+                "text-xs px-2.5 py-1.5 rounded-md transition-colors tabular-nums",
+                filterStage === item.key
+                  ? 'bg-primary/10 text-primary font-medium'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+              )}
+            >
+              {item.label} <span className="font-semibold ml-0.5">{item.count}</span>
+            </button>
+          ))}
+        </div>
       ) : (
         <div className="flex gap-1 flex-wrap">
           {([
             { key: 'all' as const, label: 'All', count: counts.total },
             { key: 'active_leads' as const, label: 'Active Leads', count: counts.active_leads },
             { key: 'meeting_stage' as const, label: 'Meeting Stage', count: counts.meeting_stage },
+            { key: 'decision_pending' as const, label: 'Decision Pending', count: counts.decision_pending },
             { key: 'cold' as const, label: 'Cold', count: counts.cold },
             { key: 'clients' as const, label: 'Clients', count: counts.clients },
             { key: 'closed' as const, label: 'Closed', count: counts.closed },
@@ -224,8 +232,8 @@ export default function ContactsPage() {
 
             // Build contextual "why" line — natural language
             const getContextLine = (): string | null => {
-              if (cs.next_action_owner_role === 'automation') return 'AI sequence running';
-              if (!actionable && cs.next_action_owner_role === 'onboarding') return 'Onboarding managing trial';
+              if (cs.next_action_owner_role === 'automation') return 'Queued';
+              if (!actionable && cs.next_action_owner_role === 'onboarding') return 'Onboarding owns this';
               if (!actionable && cs.next_action_owner_role === 'leadership') return 'Awaiting leadership decision';
               if (!actionable && cs.next_action_owner_role === 'sdr' && viewerRole !== 'sdr') return `${owner?.name?.split(' ')[0] || 'SDR'} handling next step`;
               // Trial-stage context lines removed — trial flow hidden.

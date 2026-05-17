@@ -57,7 +57,8 @@ import {
 import { toast } from 'sonner';
 import { showActionToast, showErrorToast } from '@/lib/toast-dedup';
 import { BrandProgressBadge } from '@/components/BrandProgressBadge';
-type Tab = 'overview' | 'contact' | 'lifecycle' | 'meetings' | 'trial' | 'payment' | 'credentials' | 'timeline' | 'notes';
+import { getCommercialState, COMMERCIAL_LABEL } from '@/engine/commercial-state';
+type Tab = 'overview' | 'contact' | 'lifecycle' | 'meetings' | 'payment' | 'credentials' | 'timeline' | 'notes';
 
 const TABS: { id: Tab; label: string; icon: typeof Building2 }[] = [
   { id: 'overview', label: 'Overview', icon: Building2 },
@@ -87,7 +88,8 @@ const SOURCE_LABELS: Record<string, string> = {
 /** Maps focusAction to the best default tab */
 function getTabForAction(action: ActionIntent): Tab {
   switch (action) {
-    case 'approve_trial': case 'trial_setup': case 'add_credentials': return 'trial';
+    case 'approve_trial': case 'trial_setup': return 'payment';
+    case 'add_credentials': return 'credentials';
     case 'confirm_payment': return 'payment';
     case 'log_meeting_outcome': case 'book_meeting': return 'meetings';
     default: return 'overview';
@@ -201,14 +203,15 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
       case 'trial_active':
       case 'trial_ending_soon':
       case 'trial_ended_awaiting':
-        return 'Active client';
+        return 'Pilot';
       case 'payment_window_open':
-        return 'Awaiting payment';
+        return 'Client Review';
       default:
         return null;
     }
   })();
   const headerBadgeLabel = sdrBucketLabel || BUCKET_LABELS[view.bucket] || view.state.next_action_label || 'Lead';
+  const timeline = buildUnifiedTimeline(freshLead, activities);
 
   const handleClose = () => {
     onOpenChange(false);
@@ -628,11 +631,6 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
             </>
           )}
 
-          {/* ─── TRIAL (role-aware) ────────────────── */}
-          {activeTab === 'trial' && (
-            <TrialTabContent lead={freshLead} hasCreds={hasCreds} trialDays={trialDays} trialInfo={trialInfo} onAction={handleAction} onActivate={handleActivateTrial} />
-          )}
-
           {/* ─── PAYMENT (SaaS detail) ────────────────── */}
           {activeTab === 'payment' && (
             <PaymentTabContent lead={freshLead} amount={amount} onAction={handleAction} />
@@ -646,24 +644,30 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
           {/* ─── TIMELINE ─────────────────────────────── */}
           {activeTab === 'timeline' && (
             <>
-              {activities.length === 0 ? (
+              {timeline.length === 0 ? (
                 <EmptyState icon={Clock} message="No activity yet" />
               ) : (
-                <Section title={`Activity (${activities.length})`}>
+                <Section title={`Timeline (${timeline.length})`}>
                   <div className="space-y-0">
-                    {activities.map((a, i) => (
-                      <div key={a.id} className="flex gap-3 py-2 border-b border-muted/20 last:border-0">
+                    {timeline.map((item, i) => (
+                      <div key={item.id} className="flex gap-3 py-2 border-b border-muted/20 last:border-0">
                         <div className="flex flex-col items-center">
                           <div className={cn("w-2 h-2 rounded-full mt-1.5 shrink-0",
-                            a.type === 'stage-change' ? 'bg-primary' :
-                            a.type === 'payment' ? 'bg-success' :
+                            item.kind === 'stage' ? 'bg-primary' :
+                            item.kind === 'payment' ? 'bg-success' :
+                            item.kind === 'meeting' ? 'bg-warning' :
+                            item.kind === 'credentials' ? 'bg-info' :
                             'bg-muted-foreground'
                           )} />
-                          {i < activities.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+                          {i < timeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
                         </div>
                         <div className="min-w-0 flex-1 pb-1">
-                          <p className="text-xs text-foreground">{a.description}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{format(new Date(a.createdAt), 'MMM d · h:mm a')}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs text-foreground">{item.title}</p>
+                            <Badge variant="outline" className="text-[9px] shrink-0">{item.label}</Badge>
+                          </div>
+                          {item.detail && <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-pre-wrap">{item.detail}</p>}
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{format(new Date(item.at), 'MMM d · h:mm a')}</p>
                         </div>
                       </div>
                     ))}
@@ -889,8 +893,8 @@ function PaymentTabContent({ lead, amount, onAction }: {
           {lead.subscriptionStartDate && (
             <InfoRow label="Active Since" value={format(new Date(lead.subscriptionStartDate), 'MMM d, yyyy')} />
           )}
-          {lead.trialStartDate && <InfoRow label="Trial Start" value={format(new Date(lead.trialStartDate), 'MMM d, yyyy')} />}
-          {lead.trialEndDate && <InfoRow label="Trial End" value={format(new Date(lead.trialEndDate), 'MMM d, yyyy')} />}
+        {(lead.pilotStartDate || lead.trialStartDate) && <InfoRow label="Pilot Start" value={format(new Date(lead.pilotStartDate || lead.trialStartDate!), 'MMM d, yyyy')} />}
+        {(lead.pilotEndDate || lead.trialEndDate) && <InfoRow label="Pilot End" value={format(new Date(lead.pilotEndDate || lead.trialEndDate!), 'MMM d, yyyy')} />}
           {lead.paymentReceivedAt && <InfoRow label="Conversion Date" value={format(new Date(lead.paymentReceivedAt), 'MMM d, yyyy')} />}
           <InfoRow label="Created" value={format(new Date(lead.createdAt), 'MMM d, yyyy')} />
           {lead.lastContactedAt && <InfoRow label="Last Interaction" value={format(new Date(lead.lastContactedAt), 'MMM d, h:mm a')} />}
@@ -932,6 +936,135 @@ function PaymentTabContent({ lead, amount, onAction }: {
       ) : null}
     </>
   );
+}
+
+type TimelineItem = {
+  id: string;
+  at: string;
+  kind: 'stage' | 'meeting' | 'payment' | 'credentials' | 'note' | 'activity';
+  label: string;
+  title: string;
+  detail?: string;
+};
+
+function buildUnifiedTimeline(lead: Lead, activities: Activity[]): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  const state = getCommercialState(lead);
+  items.push({
+    id: `${lead.id}:current-state`,
+    at: lead.updatedAt || lead.createdAt,
+    kind: 'stage',
+    label: 'Current',
+    title: COMMERCIAL_LABEL[state],
+    detail: `Pipeline stage: ${String(lead.stage).replace(/-/g, ' ')}`,
+  });
+
+  for (const activity of activities) {
+    items.push({
+      id: `activity:${activity.id}`,
+      at: activity.createdAt,
+      kind: activity.type === 'payment' || activity.type === 'payment_confirmed' ? 'payment'
+        : activity.type === 'meeting' ? 'meeting'
+        : activity.type === 'stage-change' ? 'stage'
+        : 'activity',
+      label: activity.type.replace(/-/g, ' '),
+      title: activity.description,
+      detail: activity.createdBy ? `By ${TEAM_MEMBERS.find(m => m.id === activity.createdBy)?.name || activity.createdBy}` : undefined,
+    });
+  }
+
+  for (const meeting of lead.meetings || []) {
+    items.push({
+      id: `meeting:${meeting.meeting_id}`,
+      at: meeting.updated_at || meeting.created_at,
+      kind: 'meeting',
+      label: meeting.status.replace(/_/g, ' '),
+      title: `Meeting ${meeting.status.replace(/_/g, ' ')}`,
+      detail: [
+        `Scheduled: ${format(new Date(meeting.scheduled_at), 'MMM d, yyyy · h:mm a')}`,
+        meeting.notes || meeting.summary,
+        meeting.outcome ? `Outcome: ${meeting.outcome.replace(/_/g, ' ')}` : '',
+        meeting.next_step ? `Next: ${meeting.next_step}` : '',
+        meeting.meeting_link ? `Link: ${meeting.meeting_link}` : '',
+      ].filter(Boolean).join('\n'),
+    });
+  }
+
+  for (const entry of getLedger(lead)) {
+    items.push({
+      id: `payment:${entry.id}`,
+      at: entry.paidAt || entry.dueDate,
+      kind: 'payment',
+      label: entry.status,
+      title: `${entry.status === 'paid' ? 'Payment received' : 'Payment due'} · ${formatMoney(entry.amount, entry.currency)}`,
+      detail: [
+        `Billing month: ${entry.billingMonth}`,
+        `Due: ${format(new Date(entry.dueDate), 'MMM d, yyyy')}`,
+        entry.paidAt ? `Paid: ${format(new Date(entry.paidAt), 'MMM d, yyyy')}` : '',
+        entry.notes,
+      ].filter(Boolean).join('\n'),
+    });
+  }
+
+  if (lead.credentials?.addedAt) {
+    items.push({
+      id: `${lead.id}:credentials`,
+      at: lead.credentials.addedAt,
+      kind: 'credentials',
+      label: 'Credentials',
+      title: 'Credentials added',
+      detail: `By ${TEAM_MEMBERS.find(m => m.id === lead.credentials?.addedBy)?.name || lead.credentials.addedBy || '—'}`,
+    });
+  }
+
+  if (lead.onboardingDoneAt) {
+    items.push({
+      id: `${lead.id}:onboarding`,
+      at: lead.onboardingDoneAt,
+      kind: 'stage',
+      label: 'Onboarding',
+      title: 'Onboarding done and verified',
+      detail: `By ${TEAM_MEMBERS.find(m => m.id === lead.onboardingDoneBy)?.name || lead.onboardingDoneBy || '—'}`,
+    });
+  }
+
+  if (lead.pilotStartDate) {
+    items.push({
+      id: `${lead.id}:pilot-start`,
+      at: lead.pilotStartDate,
+      kind: 'stage',
+      label: 'Pilot',
+      title: 'Pilot started',
+      detail: lead.pilotEndDate ? `Ends ${format(new Date(lead.pilotEndDate), 'MMM d, yyyy')}` : undefined,
+    });
+  }
+
+  if (lead.contractSignedAt) {
+    items.push({
+      id: `${lead.id}:contract`,
+      at: lead.contractSignedAt,
+      kind: 'stage',
+      label: 'Contract',
+      title: 'Contract signed',
+      detail: lead.contractEndDate ? `Contract until ${format(new Date(lead.contractEndDate), 'MMM d, yyyy')}` : undefined,
+    });
+  }
+
+  if (lead.notes) {
+    items.push({
+      id: `${lead.id}:notes`,
+      at: lead.updatedAt || lead.createdAt,
+      kind: 'note',
+      label: 'Notes',
+      title: 'Latest notes',
+      detail: lead.notes,
+    });
+  }
+
+  return items
+    .filter(item => item.at && Number.isFinite(new Date(item.at).getTime()))
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, 80);
 }
 
 // ─── Lifecycle Stages ────────────────────────────────────
@@ -984,7 +1117,7 @@ function getLifecycleStagesFromView(view: CanonicalLeadView): LifecycleStage[] {
     date: lead.meetingNotes?.[0]?.date,
   });
 
-  // 5. Trial
+  // 5. Client review / onboarding
   let trialStatus: LifecycleStage['status'] = 'upcoming';
   if (bucket === 'trial_active' || bucket === 'trial_ending_soon' ||
       bucket === 'trial_pending_approval' || bucket === 'trial_ready_to_start' ||
@@ -995,7 +1128,7 @@ function getLifecycleStagesFromView(view: CanonicalLeadView): LifecycleStage[] {
     trialStatus = 'completed';
   }
   stages.push({
-    label: 'Trial',
+    label: 'Client Review',
     status: trialStatus,
     date: lead.trialStartDate,
     duration: lead.trialStartDate && lead.trialEndDate
@@ -1026,9 +1159,11 @@ function getLifecycleStagesFromView(view: CanonicalLeadView): LifecycleStage[] {
 }
 
 function getTrialDayInfo(lead: Lead): { day: number; total: number; left: number; pct: number } | null {
-  if (!lead.trialStartDate || !lead.trialEndDate) return null;
-  const start = new Date(lead.trialStartDate).getTime();
-  const end = new Date(lead.trialEndDate).getTime();
+  const startAt = lead.pilotStartDate || lead.trialStartDate;
+  const endAt = lead.pilotEndDate || lead.trialEndDate;
+  if (!startAt || !endAt) return null;
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
   const total = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
   const elapsed = Math.ceil((Date.now() - start) / (1000 * 60 * 60 * 24));
   const left = getTrialDaysLeft(lead) ?? 0;
@@ -1056,12 +1191,12 @@ function TrialTabContent({ lead, hasCreds, trialDays, trialInfo, onAction, onAct
 
   return (
     <>
-      <Section title="Trial Status">
+      <Section title="Pilot Status">
         <InfoRow label="State" value={trialState.label} />
         <InfoRow label="Approved" value={lead.approvedBy ? `Yes (${TEAM_MEMBERS.find(m => m.id === lead.approvedBy)?.name || lead.approvedBy})` : 'Not yet'} />
         <InfoRow label="Credentials" value={hasCreds ? 'Added' : 'Missing'} />
-        {lead.trialStartDate && <InfoRow label="Start" value={format(new Date(lead.trialStartDate), 'MMM d, yyyy')} />}
-        {lead.trialEndDate && <InfoRow label="End" value={format(new Date(lead.trialEndDate), 'MMM d, yyyy')} />}
+        {(lead.pilotStartDate || lead.trialStartDate) && <InfoRow label="Start" value={format(new Date(lead.pilotStartDate || lead.trialStartDate!), 'MMM d, yyyy')} />}
+        {(lead.pilotEndDate || lead.trialEndDate) && <InfoRow label="End" value={format(new Date(lead.pilotEndDate || lead.trialEndDate!), 'MMM d, yyyy')} />}
         {trialDays !== null && <InfoRow label="Days Left" value={`${trialDays}`} />}
         <InfoRow label="Onboarding Owner" value="Muneeb" />
         <InfoRow label="Sales Owner" value={TEAM_MEMBERS.find(m => m.id === lead.assignedTo)?.name || '—'} />
@@ -1087,7 +1222,7 @@ function TrialTabContent({ lead, hasCreds, trialDays, trialInfo, onAction, onAct
       </div>
 
       {visibleTasks.length > 0 && (
-        <Section title={role === 'onboarding' ? 'Your Onboarding Tasks' : 'Your Trial Tasks'}>
+        <Section title={role === 'onboarding' ? 'Your Onboarding Tasks' : 'Pilot Tasks'}>
           {visibleTasks.map(task => (
             <div key={task.id} className={cn("flex items-center gap-2 text-xs py-1.5", task.completed && 'opacity-50')}>
               <CheckCircle className={cn("h-3 w-3 shrink-0", task.completed ? 'text-success' : 'text-muted-foreground')} />
@@ -1100,7 +1235,7 @@ function TrialTabContent({ lead, hasCreds, trialDays, trialInfo, onAction, onAct
 
       {view.permissions.canActivateTrial && (
         <Button size="sm" className="h-8 text-xs w-full" onClick={onActivate}>
-          <Rocket className="h-3 w-3 mr-1.5" /> Activate Trial Now
+          <Rocket className="h-3 w-3 mr-1.5" /> Start Pilot
         </Button>
       )}
 
@@ -1124,7 +1259,7 @@ function TrialTabContent({ lead, hasCreds, trialDays, trialInfo, onAction, onAct
 
       {view.permissions.canApproveTrial && (
         <Button size="sm" className="h-8 text-xs w-full" onClick={() => onAction?.('approve')}>
-          <Shield className="h-3 w-3 mr-1.5" /> Approve Trial
+          <Shield className="h-3 w-3 mr-1.5" /> Review Client
         </Button>
       )}
     </>

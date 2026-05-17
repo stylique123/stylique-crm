@@ -11,6 +11,13 @@ const connectorPairs = [
   ['CONNECTOR_BOTEX_URL', 'CONNECTOR_BOTEX_API_KEY'],
 ];
 
+const microsoftKeys = [
+  'MICROSOFT_TENANT_ID',
+  'MICROSOFT_CLIENT_ID',
+  'MICROSOFT_CLIENT_SECRET',
+  'MICROSOFT_CALENDAR_USER_ID',
+];
+
 const missing = required.filter(key => !process.env[key]);
 const weak = [];
 
@@ -21,6 +28,11 @@ if (process.env.STYLIQUE_ALLOWED_ORIGIN === '*') weak.push('STYLIQUE_ALLOWED_ORI
 const partialConnectors = connectorPairs
   .filter(([url, key]) => Boolean(process.env[url]) !== Boolean(process.env[key]))
   .map(([url, key]) => `${url}/${key}`);
+
+const microsoftConfigured = microsoftKeys.filter(key => process.env[key]);
+if (microsoftConfigured.length > 0 && microsoftConfigured.length < microsoftKeys.length) {
+  weak.push(`Microsoft Graph config is partial: set all of ${microsoftKeys.join(', ')}`);
+}
 
 if (missing.length || weak.length || partialConnectors.length) {
   console.error('Stylique production check failed.');

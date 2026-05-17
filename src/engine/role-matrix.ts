@@ -222,17 +222,17 @@ export const DIRECTIVE_TYPES_BY_ROLE: Record<CRMRole, string[]> = {
 // TEAM PERFORMANCE SECTIONS BY ROLE
 // ═══════════════════════════════════════════════════════════
 
-export type TeamSection = 'my_attendance' | 'my_kpi' | 'my_leave' | 'my_commission' |
-  'team_attendance' | 'team_kpi' | 'team_leave' | 'payroll' | 'people' | 'audit';
+export type TeamSection = 'my_attendance' | 'my_kpi' | 'my_leave' |
+  'team_attendance' | 'team_kpi' | 'team_leave' | 'people' | 'audit';
 
 export function getTeamSections(role: CRMRole): TeamSection[] {
   switch (role) {
     case 'ceo':
     case 'coo':
-      return ['team_attendance', 'team_kpi', 'team_leave', 'payroll', 'people', 'audit'];
+      return ['team_attendance', 'team_kpi', 'team_leave', 'people', 'audit'];
     case 'sdr':
     case 'onboarding':
-      return ['my_attendance', 'my_kpi', 'my_leave', 'my_commission'];
+      return ['my_attendance', 'my_kpi', 'my_leave'];
     default:
       return [];
   }

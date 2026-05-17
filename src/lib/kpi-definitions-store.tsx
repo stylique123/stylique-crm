@@ -56,17 +56,17 @@ const DEFAULT_DEFINITIONS: KPIDefinition[] = [
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   },
   {
-    id: 'kpi-meetings-week', name: 'Meetings Booked', code: 'meetings_booked',
-    description: 'Meetings successfully booked this week', assignedRoles: ['sdr'],
-    active: true, targetValue: 10, period: 'weekly', unit: 'meetings',
+    id: 'kpi-meetings-month', name: 'Meetings Booked', code: 'meetings_booked',
+    description: 'Meetings successfully booked this month', assignedRoles: ['sdr'],
+    active: true, targetValue: 40, period: 'monthly', unit: 'meetings',
     warningThreshold: 60, failThreshold: 40, attendanceAffects: true,
     leaveAffects: true, weekendsCount: false,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   },
   {
-    id: 'kpi-conversions-week', name: 'Conversions', code: 'conversions',
-    description: 'Conversions confirmed this week', assignedRoles: ['sdr'],
-    active: true, targetValue: 2, period: 'weekly', unit: 'conversions',
+    id: 'kpi-conversions-month', name: 'Conversions', code: 'conversions',
+    description: 'Conversions confirmed this month', assignedRoles: ['sdr'],
+    active: true, targetValue: 8, period: 'monthly', unit: 'conversions',
     warningThreshold: 60, failThreshold: 40, attendanceAffects: false,
     leaveAffects: false, weekendsCount: false,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -76,7 +76,7 @@ const DEFAULT_DEFINITIONS: KPIDefinition[] = [
 function normalizeDefs(defs: KPIDefinition[]): KPIDefinition[] {
   const byCode = new Map(defs.map(def => [def.code, def]));
   for (const def of DEFAULT_DEFINITIONS) {
-    if (!byCode.has(def.code)) byCode.set(def.code, def);
+    byCode.set(def.code, { ...def, ...(byCode.get(def.code) || {}) });
   }
 
   return Array.from(byCode.values())

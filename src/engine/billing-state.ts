@@ -32,12 +32,12 @@ export type BillingState =
   | 'not_billable';
 
 export const BILLING_LABEL: Record<BillingState, string> = {
-  awaiting_payment: 'Awaiting Payment',
+  awaiting_payment: 'Client Review',
   awaiting_confirmation: 'Awaiting Confirmation',
   paid: 'Paid',
   overdue: 'Overdue',
   closed: 'Closed',
-  not_billable: '',
+  not_billable: 'Client Review',
 };
 
 export function getBillingState(lead: Lead): BillingState {

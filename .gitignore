@@ -8,6 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.npm-cache
+.pkgmgr
 dist
 dist-ssr
 *.local
@@ -27,5 +29,3 @@ server/data
 *.njsproj
 *.sln
 *.sw?
-
-.npm-cache

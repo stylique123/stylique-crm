@@ -26,6 +26,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const OnboardingClientsPage = lazy(() => import("./pages/OnboardingClientsPage"));
 const PeoplePerformancePage = lazy(() => import("./pages/PeoplePerformancePage"));
+const PaymentsPage = lazy(() => import("./pages/PaymentsPage"));
 const PipelinePage = lazy(() => import("./pages/PipelinePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
@@ -114,7 +115,7 @@ const App = () => (
                       <Route path="/calendar" element={<RoleGuard path="/calendar"><AppLayout><PageShell><CalendarPage /></PageShell></AppLayout></RoleGuard>} />
                       <Route path="/contacts" element={<RoleGuard path="/contacts"><AppLayout><PageShell><ContactsPage /></PageShell></AppLayout></RoleGuard>} />
                       <Route path="/approvals" element={<Navigate to="/clients#payment" replace />} />
-                      <Route path="/payments" element={<Navigate to="/clients#payment" replace />} />
+                      <Route path="/payments" element={<RoleGuard path="/payments"><AppLayout><PageShell><PaymentsPage /></PageShell></AppLayout></RoleGuard>} />
                       <Route path="/clients" element={<RoleGuard path="/clients"><AppLayout><PageShell><OnboardingClientsPage /></PageShell></AppLayout></RoleGuard>} />
                       <Route path="/team" element={<RoleGuard path="/team"><AppLayout><PageShell><PeoplePerformancePage /></PageShell></AppLayout></RoleGuard>} />
                       <Route path="/admin" element={<RoleGuard path="/admin"><AppLayout><PageShell><AdminPage /></PageShell></AppLayout></RoleGuard>} />
