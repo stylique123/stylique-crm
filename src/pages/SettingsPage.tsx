@@ -303,6 +303,7 @@ export default function SettingsPage() {
       await loginToBackend(currentUser, apiPassword);
       setApiPassword('');
       setBackendHealth(await getBackendHealth());
+      await loadAuthUsers();
       toast.success('Backend auth connected');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Backend login failed');
@@ -405,6 +406,26 @@ export default function SettingsPage() {
               {authError && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   {authError}
+                </div>
+              )}
+              {authError.toLowerCase().includes('unauthorized') && (
+                <div className="rounded-md border border-border/40 bg-muted/20 p-3 space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Connect backend auth once before viewing or changing passwords.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      type="password"
+                      value={apiPassword}
+                      onChange={e => setApiPassword(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') loginApi(); }}
+                      placeholder="Your CRM password"
+                      className="h-8 text-xs"
+                    />
+                    <Button size="sm" className="h-8 text-xs" onClick={loginApi}>
+                      Connect
+                    </Button>
+                  </div>
                 </div>
               )}
               <p className="text-[11px] text-muted-foreground">
