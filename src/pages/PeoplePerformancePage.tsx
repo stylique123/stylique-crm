@@ -5,7 +5,7 @@
  * Attendance-to-compensation policy-driven deductions.
  * Tabs: Overview | Attendance | KPI | Leave | Compensation | People
  */
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useUser } from '@/lib/user-context';
 import { useAttendance, ATTENDANCE_LABELS, ATTENDANCE_COLORS, type AttendanceStatus } from '@/lib/attendance-store';
 import { useLeave, LEAVE_TYPE_LABELS, LEAVE_STATUS_LABELS, LEAVE_STATUS_COLORS, type LeaveType, checkProbationLeave } from '@/lib/leave-store';
@@ -683,6 +683,21 @@ function KPITab() {
   const [editing, setEditing] = useState<Partial<KPIDefinition>>(emptyDef());
   const [isNew, setIsNew] = useState(true);
   const [weeklyConfig, setWeeklyConfig] = useState<WeeklyKPIConfig>(getWeeklyKPIConfig);
+  const [kpiRevision, setKpiRevision] = useState(0);
+
+  useEffect(() => {
+    const refreshPolicy = () => {
+      setWeeklyConfig(getWeeklyKPIConfig());
+      kpiDefs.refresh();
+      setKpiRevision(rev => rev + 1);
+    };
+    window.addEventListener('stylique:kpi-policy-updated', refreshPolicy);
+    window.addEventListener('storage', refreshPolicy);
+    return () => {
+      window.removeEventListener('stylique:kpi-policy-updated', refreshPolicy);
+      window.removeEventListener('storage', refreshPolicy);
+    };
+  }, [kpiDefs]);
 
   const sdrs = useMemo(() => isLeadership ? TEAM.filter(m => m.role === 'sdr') : TEAM.filter(m => m.id === currentUser), [isLeadership, currentUser]);
   const [selectedSdr, setSelectedSdr] = useState(sdrs[0]?.id || currentUser);
@@ -690,8 +705,8 @@ function KPITab() {
   const weekLeaveDates = useMemo(() => 
     leave.requests.filter(r => r.userId === selectedSdr && r.status === 'approved').map(r => r.startDate),
   [leave.requests, selectedSdr]);
-  const wb = useMemo(() => computeWeeklyBrandKPI(selectedSdr, weekLeaveDates), [selectedSdr, weekLeaveDates]);
-  const weeklySnap = useMemo(() => getWeeklySnapshot(selectedSdr), [selectedSdr]);
+  const wb = useMemo(() => computeWeeklyBrandKPI(selectedSdr, weekLeaveDates, weeklyConfig), [selectedSdr, weekLeaveDates, weeklyConfig, kpiRevision]);
+  const weeklySnap = useMemo(() => getWeeklySnapshot(selectedSdr), [selectedSdr, kpiRevision]);
   const { companies, activities } = useCompanyStore();
 
   const activeKPIs = kpiDefs.getActive('sdr');
@@ -836,7 +851,13 @@ function KPITab() {
                   </Select>
                 </div>
               </div>
-              <Button size="sm" className="h-7 text-xs" onClick={() => { saveWeeklyKPIConfig(weeklyConfig); toast.success('Weekly KPI policy saved'); }}>Save Policy</Button>
+              <Button size="sm" className="h-7 text-xs" onClick={() => {
+                saveWeeklyKPIConfig(weeklyConfig);
+                kpiDefs.refresh();
+                setWeeklyConfig(getWeeklyKPIConfig());
+                setKpiRevision(rev => rev + 1);
+                toast.success('Weekly KPI policy saved');
+              }}>Save Policy</Button>
             </CardContent>
           </Card>
 
@@ -938,6 +959,7 @@ function KPITab() {
                     leaveAffects: editing.leaveAffects ?? true, weekendsCount: editing.weekendsCount ?? false,
                     createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString(),
                   } as KPIDefinition);
+                  setKpiRevision(rev => rev + 1);
                   toast.success(isNew ? 'KPI created' : 'KPI updated');
                   setEditOpen(false);
                 }}>{isNew ? 'Create' : 'Save'}</Button>

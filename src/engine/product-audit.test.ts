@@ -68,6 +68,32 @@ describe('Stylique product audit invariants', () => {
     expect(defs.find(d => d.code === 'conversions')?.period).toBe('monthly');
   });
 
+  it('keeps custom SDR KPI definitions instead of dropping them during normalization', () => {
+    localStorage.setItem('stylique-kpi-definitions', JSON.stringify([
+      {
+        id: 'kpi-custom-replies',
+        name: 'Replies This Month',
+        code: 'replies_received',
+        description: 'Custom SDR reply KPI',
+        assignedRoles: ['sdr'],
+        active: true,
+        targetValue: 20,
+        period: 'monthly',
+        unit: 'replies',
+        warningThreshold: 60,
+        failThreshold: 40,
+        attendanceAffects: true,
+        leaveAffects: true,
+        weekendsCount: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ]));
+    const defs = loadKPIDefinitions();
+    expect(defs.find(d => d.code === 'replies_received')?.targetValue).toBe(20);
+    expect(defs.find(d => d.code === 'replies_received')?.active).toBe(true);
+  });
+
   it('removes inactive teammates from runtime role and sales lists', () => {
     setTeamMembersFromEmployees([
       { id: 'abdullah', fullName: 'Abdullah', role: 'ceo', active: true },

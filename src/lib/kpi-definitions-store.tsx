@@ -4,7 +4,7 @@
  * Weekly by default. Brands Reached Out is mandatory and cannot be disabled.
  * Visible weekly scorecard stays intentionally small: brands, meetings, conversions.
  */
-import { createContext, useContext, useState, useCallback, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode, useMemo } from 'react';
 import { safeRead, safeWrite } from '@/lib/safe-storage';
 
 export type KPIMeasurePeriod = 'daily' | 'weekly' | 'monthly' | 'quarterly';
@@ -80,12 +80,8 @@ function normalizeDefs(defs: KPIDefinition[]): KPIDefinition[] {
   }
 
   return Array.from(byCode.values())
-    .filter(def => ACTIVE_SCORECARD_CODES.has(def.code) || def.assignedRoles.some(role => role !== 'sdr'))
     .map(def => {
       if (def.code === MANDATORY_KPI_CODE) return { ...def, mandatory: true, active: true };
-      if (!ACTIVE_SCORECARD_CODES.has(def.code) && def.assignedRoles.includes('sdr')) {
-        return { ...def, active: false };
-      }
       return def;
     });
 }
@@ -170,6 +166,16 @@ export function KPIDefinitionsProvider({ children }: { children: ReactNode }) {
   }, [persist]);
 
   const refresh = useCallback(() => setDefinitions(loadDefs()), []);
+
+  useEffect(() => {
+    const refreshFromExternalUpdate = () => setDefinitions(loadDefs());
+    window.addEventListener('stylique:kpi-policy-updated', refreshFromExternalUpdate);
+    window.addEventListener('storage', refreshFromExternalUpdate);
+    return () => {
+      window.removeEventListener('stylique:kpi-policy-updated', refreshFromExternalUpdate);
+      window.removeEventListener('storage', refreshFromExternalUpdate);
+    };
+  }, []);
 
   const value = useMemo(() => ({
     definitions, getActive, getForUser, save, remove, toggle, refresh,
