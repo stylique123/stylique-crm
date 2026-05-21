@@ -33,7 +33,7 @@ import { toast } from 'sonner';
 
 const LEAD_FIELDS = [
   { key: 'companyName', label: 'Company Name', required: true },
-  { key: 'contactName', label: 'Contact Name', required: true },
+  { key: 'contactName', label: 'Contact Name', required: false },
   { key: 'contactEmail', label: 'Email', required: false },
   { key: 'contactPhone', label: 'Phone', required: false },
   { key: 'website', label: 'Website', required: false },
@@ -66,7 +66,7 @@ interface CSVImportDialogProps {
   defaultFlow?: EntryFlow;
 }
 
-function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
+export function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const table: string[][] = [];
   let row: string[] = [];
   let cell = '';
@@ -104,19 +104,19 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
   return { headers, rows };
 }
 
-function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKey | ''> {
+export function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKey | ''> {
   const mapping: Record<string, LeadFieldKey | ''> = {};
   const ALIASES: Record<string, string[]> = {
-    companyName: ['company', 'company name', 'business', 'brand', 'organization'],
-    contactName: ['contact', 'contact name', 'name', 'full name', 'person'],
-    contactEmail: ['email', 'e-mail', 'contact email', 'email address'],
-    contactPhone: ['phone', 'telephone', 'mobile', 'contact phone', 'phone number'],
-    website: ['website', 'url', 'web', 'site'],
-    instagram: ['instagram', 'ig', 'insta'],
-    linkedin: ['linkedin', 'linked in'],
-    source: ['source', 'lead source', 'channel', 'origin', 'syncgtm', 'linkedin navigator', 'sales navigator'],
-    country: ['country', 'region', 'geography'],
-    city: ['city', 'location'],
+    companyName: ['company', 'company name', 'business', 'brand', 'brand name', 'organization', 'organisation', 'account', 'store', 'shop', 'client', 'merchant'],
+    contactName: ['contact', 'contact name', 'name', 'full name', 'person', 'first name', 'lead name', 'prospect', 'decision maker', 'primary contact'],
+    contactEmail: ['email', 'e-mail', 'contact email', 'email address', 'work email', 'mail'],
+    contactPhone: ['phone', 'telephone', 'mobile', 'contact phone', 'phone number', 'whatsapp', 'number'],
+    website: ['website', 'url', 'web', 'site', 'domain', 'store url', 'company website'],
+    instagram: ['instagram', 'ig', 'insta', 'instagram url', 'instagram handle'],
+    linkedin: ['linkedin', 'linked in', 'linkedin url', 'linkedin profile', 'sales navigator'],
+    source: ['source', 'lead source', 'channel', 'origin', 'syncgtm', 'linkedin navigator', 'sales navigator', 'import source'],
+    country: ['country', 'region', 'geography', 'market'],
+    city: ['city', 'location', 'town'],
     platform: ['platform', 'ecommerce', 'e-commerce'],
     notes: ['notes', 'comments', 'description'],
     owner: ['owner', 'assigned to', 'rep', 'sdr'],
@@ -127,8 +127,23 @@ function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKey | ''>
   for (const csvH of csvHeaders) {
     const lower = csvH.toLowerCase().trim();
     let matched: LeadFieldKey | '' = '';
+    if (lower.includes('sales navigator') || lower.includes('linkedin') || lower.includes('linked in')) {
+      mapping[csvH] = 'linkedin';
+      continue;
+    }
+    if (lower.includes('instagram') || lower === 'ig' || lower.includes('insta')) {
+      mapping[csvH] = 'instagram';
+      continue;
+    }
     for (const [field, aliases] of Object.entries(ALIASES)) {
-      if (aliases.includes(lower) || lower === field.toLowerCase()) {
+      const normalizedField = field.toLowerCase();
+      if (
+        aliases.includes(lower) ||
+        lower === normalizedField ||
+        aliases.some(alias => lower.includes(alias)) ||
+        (lower.includes('company') && lower.includes('name') && field === 'companyName') ||
+        (lower.includes('contact') && lower.includes('name') && field === 'contactName')
+      ) {
         matched = field as LeadFieldKey;
         break;
       }
@@ -161,6 +176,14 @@ function contactAlreadyExists(contacts: BrandContact[] | undefined, email?: stri
     (e && c.email?.toLowerCase() === e) ||
     (n && c.name.trim().toLowerCase() === n)
   );
+}
+
+function fallbackContactName(mapped: Partial<Record<LeadFieldKey, string>>): string {
+  const explicit = mapped.contactName?.trim();
+  if (explicit) return explicit;
+  const emailName = mapped.contactEmail?.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+  if (emailName) return emailName.replace(/\b\w/g, ch => ch.toUpperCase());
+  return 'Primary contact';
 }
 
 export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDialogProps) {
@@ -296,7 +319,8 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       if (!row.selected || row.action === 'skip') { skipped++; continue; }
 
       const m = row.mapped;
-      if (!m.companyName || !m.contactName) { errors++; continue; }
+      if (!m.companyName) { errors++; continue; }
+      const contactName = fallbackContactName(m);
 
       if (row.action === 'merge' && row.duplicateId) {
         // Merge into existing brand record. Brands are canonical; people are contacts.
@@ -314,7 +338,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         }];
         const contact: BrandContact = {
           id: uid(),
-          name: m.contactName.trim(),
+          name: contactName,
           email: m.contactEmail?.trim() || undefined,
           phone: m.contactPhone?.trim() || undefined,
           linkedin: m.linkedin?.trim() || undefined,
@@ -343,7 +367,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
           notes: [
             existing.notes,
             m.notes ? `[Import] ${m.notes}` : '',
-            `Imported contact: ${m.contactName.trim()}${m.contactEmail ? ` · ${m.contactEmail}` : ''}`,
+            `Imported contact: ${contactName}${m.contactEmail ? ` · ${m.contactEmail}` : ''}`,
           ].filter(Boolean).join('\n'),
           updatedAt: now,
         };
@@ -367,7 +391,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       const lead: Lead = {
         id: uid(),
         companyName: m.companyName.trim(),
-        contactName: m.contactName.trim(),
+        contactName,
         contactEmail: m.contactEmail?.trim() || '',
         contactPhone: m.contactPhone?.trim() || undefined,
         website: m.website?.trim() || undefined,
@@ -375,7 +399,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         linkedin: m.linkedin?.trim() || undefined,
         contacts: [{
           id: primaryContactId,
-          name: m.contactName.trim(),
+          name: contactName,
           email: m.contactEmail?.trim() || undefined,
           phone: m.contactPhone?.trim() || undefined,
           linkedin: m.linkedin?.trim() || undefined,
@@ -440,8 +464,8 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   };
 
   const dupeCount = parsedRows.filter(r => r.isDuplicate).length;
-  const validCount = parsedRows.filter(r => r.mapped.companyName && r.mapped.contactName).length;
-  const hasRequiredFields = !!(fieldMapping && Object.values(fieldMapping).includes('companyName') && Object.values(fieldMapping).includes('contactName'));
+  const validCount = parsedRows.filter(r => r.mapped.companyName).length;
+  const hasRequiredFields = !!(fieldMapping && Object.values(fieldMapping).includes('companyName'));
 
   const createDemoLead = async () => {
     if (!demoCompany.trim() || !demoContact.trim() || !demoEmail.trim()) {
@@ -589,7 +613,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                   <Upload className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3" />
                   <p className="text-sm font-medium">Click to upload CSV</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Columns: Company and Contact are required. Email, Phone, Source, Geography, Platform, Notes are optional.
+                    Company/Brand is the only required field. Contact, Email, Phone, Source, Geography, Platform, Notes are auto-filled when present.
                   </p>
                 </div>
                 <input
@@ -639,7 +663,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                 {!hasRequiredFields && (
                   <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/10 text-destructive text-xs">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    Map Company Name and Contact Name. Email is optional.
+                    Map Company Name. Contact and Email are optional.
                   </div>
                 )}
 
@@ -696,7 +720,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                 <ScrollArea className="max-h-64">
                   <div className="space-y-1.5">
                     {parsedRows.map((row, idx) => {
-                      const valid = !!(row.mapped.companyName && row.mapped.contactName);
+                      const valid = !!row.mapped.companyName;
                       return (
                         <div
                           key={idx}
@@ -715,7 +739,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                           <div className="min-w-0 flex-1">
                             <p className="font-medium truncate">{row.mapped.companyName || '—'}</p>
                             <p className="text-muted-foreground truncate">
-                              {row.mapped.contactName} · {row.mapped.contactEmail}
+                              {fallbackContactName(row.mapped)}{row.mapped.contactEmail ? ` · ${row.mapped.contactEmail}` : ''}
                             </p>
                           </div>
                           {row.isDuplicate && (

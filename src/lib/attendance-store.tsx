@@ -3,6 +3,7 @@
  * Full check-in/check-out, leave management, and attendance tracking.
  */
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode, useMemo } from 'react';
+import { getApiToken, getStateBucket, saveStateBucket } from '@/lib/backend-api';
 
 export type AttendanceStatus =
   | 'present' | 'late' | 'absent' | 'half_day'
@@ -77,6 +78,13 @@ function loadEntries(): AttendanceEntry[] {
 }
 function saveEntries(entries: AttendanceEntry[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+}
+
+function syncAttendance(entries: AttendanceEntry[]) {
+  if (!getApiToken()) return;
+  saveStateBucket('attendance', entries).catch(error => {
+    console.warn('[Attendance persistence] Could not sync attendance', error);
+  });
 }
 
 function todayKey(): string { return new Date().toISOString().slice(0, 10); }
@@ -217,6 +225,20 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
   const persist = useCallback((updated: AttendanceEntry[]) => {
     setEntries(updated);
     saveEntries(updated);
+    syncAttendance(updated);
+  }, []);
+
+  useEffect(() => {
+    if (!getApiToken()) return;
+    let cancelled = false;
+    getStateBucket<AttendanceEntry>('attendance')
+      .then(remote => {
+        if (cancelled || !Array.isArray(remote)) return;
+        saveEntries(remote);
+        setEntries(remote);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const upsert = useCallback((userId: string, date: string, patch: Partial<AttendanceEntry>) => {

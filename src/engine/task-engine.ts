@@ -415,7 +415,7 @@ export function archiveStaleTasksForStage(tasks: DealTask[], newStage: string): 
 
   const ARCHIVE_ON_STAGE: Record<string, DealTask['type'][]> = {
     'trial-proposed': ['outreach', 'follow-up', 'meeting-prep', 'meeting-summary'],
-    'trial-active': ['outreach', 'follow-up', 'meeting-prep', 'meeting-summary'],
+    'trial-active': ['outreach', 'follow-up', 'meeting-prep', 'meeting-summary', 'onboarding', 'check-in'],
     'payment-pending': ['onboarding', 'check-in', 'conversion-push', 'trial-end'],
     'converted': ['onboarding', 'check-in', 'conversion-push', 'trial-end', 'payment', 'follow-up'],
     'closed-lost': ['outreach', 'follow-up', 'onboarding', 'check-in', 'conversion-push', 'trial-end', 'payment', 'meeting-prep', 'meeting-summary'],

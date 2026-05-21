@@ -2,8 +2,9 @@
  * STYLIQUE CRM — Leave Request Store
  * Full leave/permission flow with types, approval, probation enforcement, and attendance sync.
  */
-import { createContext, useContext, useState, useCallback, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode, useMemo } from 'react';
 import { safeId, safeRead, safeWrite } from '@/lib/safe-storage';
+import { getApiToken, getStateBucket, saveStateBucket } from '@/lib/backend-api';
 
 export type LeaveType =
   | 'full_day' | 'half_day' | 'late_arrival' | 'early_leave'
@@ -87,6 +88,13 @@ function save(items: LeaveRequest[]) {
   safeWrite(STORAGE_KEY, items);
 }
 
+function syncLeave(items: LeaveRequest[]) {
+  if (!getApiToken()) return;
+  saveStateBucket('leave-requests', items).catch(error => {
+    console.warn('[Leave persistence] Could not sync leave requests', error);
+  });
+}
+
 /** Check how many leaves an employee has used in a given month */
 function countMonthlyLeaves(requests: LeaveRequest[], userId: string, yearMonth: string): number {
   return requests.filter(r =>
@@ -166,6 +174,20 @@ export function LeaveProvider({ children }: { children: ReactNode }) {
   const persist = useCallback((updated: LeaveRequest[]) => {
     setRequests(updated);
     save(updated);
+    syncLeave(updated);
+  }, []);
+
+  useEffect(() => {
+    if (!getApiToken()) return;
+    let cancelled = false;
+    getStateBucket<LeaveRequest>('leave-requests')
+      .then(remote => {
+        if (cancelled || !Array.isArray(remote)) return;
+        save(remote);
+        setRequests(remote);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const submit = useCallback((
@@ -268,6 +290,11 @@ export function LeaveProvider({ children }: { children: ReactNode }) {
         else entries.push(patch);
       }
       safeWrite(attendanceKey, entries);
+      if (getApiToken()) {
+        saveStateBucket('attendance', entries).catch(error => {
+          console.warn('[Leave persistence] Could not sync approved leave to attendance', error);
+        });
+      }
       window.dispatchEvent(new CustomEvent('stylique-attendance-sync'));
     }
   }, [updateStatus]);

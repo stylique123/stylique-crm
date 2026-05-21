@@ -12,6 +12,7 @@ import type {
 } from '@/types/kpi';
 import { DEFAULT_KPI_TARGETS } from '@/types/kpi';
 import { safeRead, safeWrite } from '@/lib/safe-storage';
+import { getApiToken, saveStateBucket } from '@/lib/backend-api';
 
 const KEYS = {
   actions: 'stylique-kpi-actions',
@@ -27,6 +28,13 @@ function readJSON<T>(key: string): T[] {
 
 function writeJSON<T>(key: string, data: T[]) {
   safeWrite(key, data);
+}
+
+function syncKPIActions(actions: KPIActionEntry[]) {
+  if (!getApiToken()) return;
+  saveStateBucket('kpi-actions', actions).catch(error => {
+    console.warn('[KPI persistence] Could not sync KPI actions', error);
+  });
 }
 
 // ─── Action Log ─────────────────────────────────────────
@@ -56,6 +64,7 @@ export function logKPIAction(entry: KPIActionEntry) {
   }
   actions.push(entry);
   writeJSON(KEYS.actions, actions);
+  syncKPIActions(actions);
 }
 
 /** Create and log a KPI action entry */

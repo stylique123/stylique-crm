@@ -6,6 +6,7 @@
  */
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode, useMemo } from 'react';
 import { safeRead, safeWrite } from '@/lib/safe-storage';
+import { getApiToken, getStateBucket, saveStateBucket } from '@/lib/backend-api';
 
 export type KPIMeasurePeriod = 'daily' | 'weekly' | 'monthly' | 'quarterly';
 export type KPIUnit =
@@ -99,6 +100,13 @@ function saveDefs(defs: KPIDefinition[]) {
   safeWrite(STORAGE_KEY, defs);
 }
 
+function syncDefs(defs: KPIDefinition[]) {
+  if (!getApiToken()) return;
+  saveStateBucket('kpi-definitions', defs).catch(error => {
+    console.warn('[KPI persistence] Could not sync KPI definitions', error);
+  });
+}
+
 /** Get the effective target for a user, considering per-user overrides */
 export function getEffectiveTarget(def: KPIDefinition, userId?: string): number {
   if (userId && def.userTargetOverrides?.[userId] !== undefined) {
@@ -125,6 +133,27 @@ export function KPIDefinitionsProvider({ children }: { children: ReactNode }) {
   const persist = useCallback((updated: KPIDefinition[]) => {
     setDefinitions(updated);
     saveDefs(updated);
+    syncDefs(updated);
+  }, []);
+
+  useEffect(() => {
+    if (!getApiToken()) return;
+    let cancelled = false;
+    Promise.all([
+      getStateBucket<KPIDefinition>('kpi-definitions').catch(() => null),
+      getStateBucket<Record<string, unknown>>('kpi-actions').catch(() => null),
+    ]).then(([remoteDefs, remoteActions]) => {
+      if (cancelled) return;
+      if (Array.isArray(remoteDefs) && remoteDefs.length > 0) {
+        const defs = normalizeDefs(remoteDefs);
+        saveDefs(defs);
+        setDefinitions(defs);
+      }
+      if (Array.isArray(remoteActions)) {
+        safeWrite('stylique-kpi-actions', remoteActions);
+      }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const getActive = useCallback((role?: string) => {

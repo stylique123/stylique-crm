@@ -13,6 +13,7 @@
 import { getKPIActions, todayKey, getBrandCoverage } from '@/engine/kpi-engine';
 import type { KPIActionEntry } from '@/types/kpi';
 import { safeRead, safeWrite } from '@/lib/safe-storage';
+import { getApiToken, saveStateBucket } from '@/lib/backend-api';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -68,6 +69,11 @@ export function saveWeeklyKPIConfig(config: WeeklyKPIConfig) {
       }
     }
     safeWrite(KPI_KEY, defs);
+    if (getApiToken()) {
+      saveStateBucket('kpi-definitions', defs).catch(error => {
+        console.warn('[WeeklyKPI] Could not sync KPI definitions to backend', error);
+      });
+    }
     const targets = safeRead<Record<string, unknown>>('stylique-kpi-targets', {});
     safeWrite('stylique-kpi-targets', { ...targets, brandsPerDay: config.brandsPerWorkingDay });
     if (typeof window !== 'undefined') {
