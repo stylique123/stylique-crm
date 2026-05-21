@@ -64,7 +64,7 @@ export type NextRequiredAction =
 
 export type OwnerRole = 'sdr' | 'onboarding' | 'leadership' | 'automation' | 'none';
 
-export type ViewerRole = 'sdr' | 'onboarding' | 'ceo' | 'coo';
+export type ViewerRole = 'sdr' | 'onboarding' | 'ceo' | 'coo' | 'operations';
 
 // ═══════════════════════════════════════════════════════════
 // CANONICAL STATE — the ONE object every page reads
@@ -158,6 +158,8 @@ export function isActionableForRole(state: CanonicalState, viewerRole: ViewerRol
     case 'ceo':
     case 'coo':
       return ownerRole === 'leadership';
+    case 'operations':
+      return false;
   }
 }
 
@@ -212,7 +214,7 @@ export function getReadOnlyStatusLabel(lead: Lead, viewerRole: ViewerRole): stri
   }
 
   // CEO/COO viewing non-leadership owned records
-  if (viewerRole === 'ceo' || viewerRole === 'coo') {
+  if (viewerRole === 'ceo' || viewerRole === 'coo' || viewerRole === 'operations') {
     if (state.next_action_owner_role === 'sdr') {
       return `${ownerName} handling outreach`;
     }

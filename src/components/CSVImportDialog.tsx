@@ -17,6 +17,7 @@ import {
   Upload, FileText, AlertTriangle, CheckCircle, X, ArrowRight,
   Globe, Users, MapPin, ChevronRight,
 } from 'lucide-react';
+import { strFromU8, unzipSync } from 'fflate';
 import { cn } from '@/lib/utils';
 import { useCompanyStore } from '@/lib/company-store';
 import { useUser } from '@/lib/user-context';
@@ -104,6 +105,92 @@ export function parseCSV(text: string): { headers: string[]; rows: Record<string
   return { headers, rows };
 }
 
+function columnIndex(cellRef: string): number {
+  const letters = (cellRef.match(/[A-Z]+/i)?.[0] || '').toUpperCase();
+  let index = 0;
+  for (const letter of letters) index = index * 26 + (letter.charCodeAt(0) - 64);
+  return Math.max(0, index - 1);
+}
+
+function xmlAttr(xml: string, name: string): string {
+  return xml.match(new RegExp(`\\b${name}="([^"]*)"`, 'i'))?.[1] || '';
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
+}
+
+function stripXmlTags(xml: string): string {
+  return decodeXmlText(xml.replace(/<[^>]+>/g, ''));
+}
+
+function decodeSheetXmlCell(cellXml: string, sharedStrings: string[]): string {
+  const type = xmlAttr(cellXml, 't');
+  if (type === 'inlineStr') {
+    return (cellXml.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map(stripXmlTags).join('').trim();
+  }
+  const raw = decodeXmlText(cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1] || '');
+  if (type === 's') return sharedStrings[Number(raw)] || '';
+  if (type === 'b') return raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : raw;
+  return raw;
+}
+
+function resolveFirstSheetPath(files: Record<string, Uint8Array>): string | null {
+  const workbookBytes = files['xl/workbook.xml'];
+  const relBytes = files['xl/_rels/workbook.xml.rels'];
+  if (workbookBytes && relBytes) {
+    const workbookXml = strFromU8(workbookBytes);
+    const firstSheet = workbookXml.match(/<sheet\b[^>]*>/i)?.[0] || '';
+    const relId = xmlAttr(firstSheet, 'r:id') || xmlAttr(firstSheet, 'id');
+    if (relId) {
+      const relsXml = strFromU8(relBytes);
+      const rel = (relsXml.match(/<Relationship\b[^>]*>/gi) || []).find(r => xmlAttr(r, 'Id') === relId);
+      const target = rel ? xmlAttr(rel, 'Target') : '';
+      if (target) {
+        const normalized = target.startsWith('/')
+          ? target.replace(/^\/+/, '')
+          : `xl/${target.replace(/^(\.\.\/)+/, '')}`;
+        if (files[normalized]) return normalized;
+      }
+    }
+  }
+  return Object.keys(files).find(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)) || null;
+}
+
+export function parseXLSX(buffer: ArrayBuffer): { headers: string[]; rows: Record<string, string>[] } {
+  const files = unzipSync(new Uint8Array(buffer));
+  const sharedStringsXml = files['xl/sharedStrings.xml'];
+  const sharedStrings = sharedStringsXml
+    ? (strFromU8(sharedStringsXml).match(/<si\b[\s\S]*?<\/si>/gi) || []).map(stripXmlTags)
+    : [];
+
+  const sheetPath = resolveFirstSheetPath(files);
+  if (!sheetPath) return { headers: [], rows: [] };
+  const sheetXml = strFromU8(files[sheetPath]);
+  const table = (sheetXml.match(/<row\b[\s\S]*?<\/row>/gi) || []).map(rowXml => {
+    const row: string[] = [];
+    (rowXml.match(/<c\b[\s\S]*?<\/c>/gi) || []).forEach(cellXml => {
+      row[columnIndex(xmlAttr(cellXml, 'r'))] = decodeSheetXmlCell(cellXml, sharedStrings);
+    });
+    return row.map(v => (v || '').trim());
+  }).filter(row => row.some(Boolean));
+
+  if (table.length < 2) return { headers: [], rows: [] };
+  const headers = table[0].map(h => h.trim()).filter(Boolean);
+  const rows = table.slice(1).map(values => {
+    const obj: Record<string, string> = {};
+    headers.forEach((h, i) => { obj[h] = (values[i] || '').trim(); });
+    return obj;
+  });
+  return { headers, rows };
+}
+
 export function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKey | ''> {
   const mapping: Record<string, LeadFieldKey | ''> = {};
   const ALIASES: Record<string, string[]> = {
@@ -111,14 +198,14 @@ export function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKe
     contactName: ['contact', 'contact name', 'name', 'full name', 'person', 'first name', 'lead name', 'prospect', 'decision maker', 'primary contact'],
     contactEmail: ['email', 'e-mail', 'contact email', 'email address', 'work email', 'mail'],
     contactPhone: ['phone', 'telephone', 'mobile', 'contact phone', 'phone number', 'whatsapp', 'number'],
-    website: ['website', 'url', 'web', 'site', 'domain', 'store url', 'company website'],
+    website: ['website', 'url', 'web', 'site', 'domain', 'store url', 'company website', 'company website url', 'website url', 'company url'],
     instagram: ['instagram', 'ig', 'insta', 'instagram url', 'instagram handle'],
     linkedin: ['linkedin', 'linked in', 'linkedin url', 'linkedin profile', 'sales navigator'],
     source: ['source', 'lead source', 'channel', 'origin', 'syncgtm', 'linkedin navigator', 'sales navigator', 'import source'],
     country: ['country', 'region', 'geography', 'market'],
     city: ['city', 'location', 'town'],
     platform: ['platform', 'ecommerce', 'e-commerce'],
-    notes: ['notes', 'comments', 'description'],
+    notes: ['notes', 'comments', 'description', 'qualify contact', 'qualification', 'seniority'],
     owner: ['owner', 'assigned to', 'rep', 'sdr'],
     stage: ['stage', 'status', 'pipeline stage'],
     tags: ['tags', 'labels', 'categories'],
@@ -133,6 +220,14 @@ export function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKe
     }
     if (lower.includes('instagram') || lower === 'ig' || lower.includes('insta')) {
       mapping[csvH] = 'instagram';
+      continue;
+    }
+    if ((lower.includes('website') || lower.includes('url') || lower.includes('domain')) && !lower.includes('linkedin') && !lower.includes('instagram')) {
+      mapping[csvH] = 'website';
+      continue;
+    }
+    if (lower.includes('qualif') || lower.includes('seniority')) {
+      mapping[csvH] = 'notes';
       continue;
     }
     for (const [field, aliases] of Object.entries(ALIASES)) {
@@ -220,57 +315,56 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
     setImportResults({ imported: 0, merged: 0, skipped: 0, errors: 0 });
   };
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const buildParsedRows = useCallback((rows: Record<string, string>[], mapping: Record<string, LeadFieldKey | ''>) => {
+    return rows.map(raw => {
+      const row: Partial<Record<LeadFieldKey, string>> = {};
+      for (const [csvH, leadField] of Object.entries(mapping)) {
+        if (leadField && raw[csvH]) row[leadField] = raw[csvH];
+      }
+
+      const existingByName = companies.find(c =>
+        normalizeBrandName(c.companyName) === normalizeBrandName(row.companyName)
+      );
+
+      return {
+        raw,
+        mapped: row,
+        isDuplicate: !!existingByName,
+        duplicateId: existingByName?.id,
+        selected: true,
+        action: existingByName ? 'merge' as const : 'import' as const,
+      };
+    });
+  }, [companies]);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      if (!text) return;
-
-      const { headers, rows } = parseCSV(text);
+    try {
+      const fileName = file.name.toLowerCase();
+      const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xlsm') || file.type.includes('spreadsheet');
+      const parsed = isExcel
+        ? parseXLSX(await file.arrayBuffer())
+        : parseCSV(await file.text());
+      const { headers, rows } = parsed;
       if (headers.length === 0) {
-        toast.error('Could not parse CSV — check file format');
+        toast.error(isExcel ? 'Could not read spreadsheet — use the first sheet with a header row' : 'Could not parse CSV — check file format');
         return;
       }
 
       setCsvHeaders(headers);
       const autoMap = autoMapHeaders(headers);
       setFieldMapping(autoMap);
-
-      // Build parsed rows with dedupe check
-      const mapped = rows.map(raw => {
-        const row: Partial<Record<LeadFieldKey, string>> = {};
-        for (const [csvH, leadField] of Object.entries(autoMap)) {
-          if (leadField && raw[csvH]) {
-            row[leadField] = raw[csvH];
-          }
-        }
-
-        // Dedupe: check by company name + email
-        const existingByName = companies.find(c =>
-          normalizeBrandName(c.companyName) === normalizeBrandName(row.companyName)
-        );
-        const duplicate = existingByName;
-
-        return {
-          raw,
-          mapped: row,
-          isDuplicate: !!duplicate,
-          duplicateId: duplicate?.id,
-          selected: true,
-          action: duplicate ? 'merge' as const : 'import' as const,
-        };
-      });
-
-      setParsedRows(mapped);
+      setParsedRows(buildParsedRows(rows, autoMap));
       setStep('map');
-      toast.success(`Parsed ${rows.length} rows from CSV`);
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  }, [companies]);
+      toast.success(`Parsed ${rows.length} rows from ${isExcel ? 'spreadsheet' : 'CSV'}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Import file could not be read');
+    } finally {
+      e.target.value = '';
+    }
+  }, [buildParsedRows]);
 
   const handleMappingChange = (csvHeader: string, leadField: LeadFieldKey | '') => {
     setFieldMapping(prev => ({ ...prev, [csvHeader]: leadField }));
@@ -468,8 +562,8 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   const hasRequiredFields = !!(fieldMapping && Object.values(fieldMapping).includes('companyName'));
 
   const createDemoLead = async () => {
-    if (!demoCompany.trim() || !demoContact.trim() || !demoEmail.trim()) {
-      toast.error('Company, contact, and email are required');
+    if (!demoCompany.trim() || !demoContact.trim()) {
+      toast.error('Company and contact are required');
       return;
     }
     const now = new Date().toISOString();
@@ -588,14 +682,14 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
             Import Leads
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Import brands from CSV, book-a-demo CSV, or configured connectors
+            Import brands from CSV, Excel, book-a-demo exports, or configured connectors
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={importMode} onValueChange={v => setImportMode(v as 'csv' | 'demo')}>
           <TabsList className="h-8 w-full">
             <TabsTrigger value="csv" className="text-xs flex-1">
-              <FileText className="h-3 w-3 mr-1" /> CSV Upload
+              <FileText className="h-3 w-3 mr-1" /> File Upload
             </TabsTrigger>
             <TabsTrigger value="demo" className="text-xs flex-1">
               <Globe className="h-3 w-3 mr-1" /> Book-a-demo
@@ -611,7 +705,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3" />
-                  <p className="text-sm font-medium">Click to upload CSV</p>
+                  <p className="text-sm font-medium">Click to upload CSV or Excel</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Company/Brand is the only required field. Contact, Email, Phone, Source, Geography, Platform, Notes are auto-filled when present.
                   </p>
@@ -619,7 +713,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12"
                   className="hidden"
                   onChange={handleFileUpload}
                 />
@@ -656,7 +750,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
             {step === 'map' && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Map CSV columns to lead fields</p>
+                  <p className="text-sm font-medium">Map file columns to lead fields</p>
                   <Badge variant="secondary" className="text-xs">{csvHeaders.length} columns</Badge>
                 </div>
 
@@ -831,7 +925,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground">
-                    Live sync uses Settings → Connectors. CSV exports can be uploaded from the CSV tab.
+                    Live sync uses Settings → Connectors. CSV or Excel exports can be uploaded from the File Upload tab.
                   </p>
                 </div>
 

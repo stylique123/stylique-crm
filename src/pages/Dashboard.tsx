@@ -4,6 +4,7 @@ import { useCompanyStore } from '@/lib/company-store';
 import { useAttendance } from '@/lib/attendance-store';
 import { useEmployees } from '@/lib/employee-store';
 import { useUser } from '@/lib/user-context';
+import { isLeadershipRole } from '@/lib/role';
 import { Lead, getActiveDeal, formatMoney, hasValidCredentials } from '@/types/crm';
 import { getCommercialState } from '@/engine/commercial-state';
 import { paidThisMonth } from '@/engine/payment-ledger';
@@ -58,7 +59,7 @@ export default function Dashboard() {
   const { role, currentUser, userName } = useUser();
   const navigate = useNavigate();
   const isSdr = role === 'sdr';
-  const isLeadership = role === 'ceo' || role === 'coo';
+  const isLeadership = isLeadershipRole(role);
   const employee = employees.employees.find(e => e.id === currentUser);
   const todayAttendance = attendance.getToday(currentUser, employee?.timezone);
 

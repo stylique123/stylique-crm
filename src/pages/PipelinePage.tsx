@@ -327,7 +327,7 @@ function DealCard({
 export default function PipelinePage() {
   const { companies, refresh, saveCompany, addActivity } = useCompanyStore();
   const { currentUser, role, isSdr } = useUser();
-  const viewerRole: ViewerRole = role === 'ceo' || role === 'coo' ? role : role === 'onboarding' ? 'onboarding' : 'sdr';
+  const viewerRole: ViewerRole = role === 'ceo' || role === 'coo' || role === 'operations' ? role : role === 'onboarding' ? 'onboarding' : 'sdr';
   const bridge = useMemo(() => ({ saveCompany, addActivity }), [saveCompany, addActivity]);
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);

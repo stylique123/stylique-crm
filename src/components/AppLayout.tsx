@@ -27,6 +27,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const roleColors: Record<string, string> = {
     ceo: 'bg-primary/15 text-primary',
     coo: 'bg-primary/15 text-primary',
+    operations: 'bg-emerald-500/15 text-emerald-600',
     sdr: 'bg-info/15 text-info',
     onboarding: 'bg-warning/15 text-warning',
   };

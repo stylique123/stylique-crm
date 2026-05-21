@@ -7,7 +7,7 @@
 import type { Lead } from '@/types/crm';
 import { getCanonicalState } from '@/engine/canonical-state';
 
-export type CRMRole = 'ceo' | 'coo' | 'sdr' | 'onboarding';
+export type CRMRole = 'ceo' | 'coo' | 'sdr' | 'onboarding' | 'operations';
 
 // ═══════════════════════════════════════════════════════════
 // PAGE ACCESS MATRIX
@@ -29,60 +29,70 @@ const PAGE_ACCESS: Record<PageId, Record<CRMRole, PageAccess>> = {
   dashboard: {
     ceo: { canView: true, canAct: true, label: 'Command Center', description: 'Revenue, decisions, and business risk' },
     coo: { canView: true, canAct: true, label: 'Command Center', description: 'Revenue, decisions, and business risk' },
+    operations: { canView: true, canAct: false, label: 'Command Center', description: 'Revenue, decisions, and business risk' },
     sdr: { canView: false, canAct: false, label: '', description: '' },
     onboarding: { canView: false, canAct: false, label: '', description: '' },
   },
   tasks: {
     ceo: { canView: true, canAct: true, label: 'Decisions', description: 'Approvals, payments, and items that need you' },
     coo: { canView: true, canAct: true, label: 'Decisions', description: 'Approvals, payments, and items that need you' },
+    operations: { canView: true, canAct: false, label: 'Decisions', description: 'Approvals, payments, and items that need attention' },
     sdr: { canView: true, canAct: true, label: 'My Tasks', description: 'Your work for today' },
     onboarding: { canView: true, canAct: true, label: 'My Tasks', description: 'Setup, check-ins, and client support' },
   },
   pipeline: {
     ceo: { canView: true, canAct: false, label: 'Pipeline', description: 'All deals — view only' },
     coo: { canView: true, canAct: false, label: 'Pipeline', description: 'All deals — view only' },
+    operations: { canView: true, canAct: false, label: 'Pipeline', description: 'All deals — view only' },
     sdr: { canView: true, canAct: true, label: 'My Pipeline', description: 'Your active deals' },
     onboarding: { canView: true, canAct: false, label: 'Pipeline', description: 'Trial and client records' },
   },
   trials: {
     ceo: { canView: true, canAct: true, label: 'Trials', description: 'Approvals and trial oversight' },
     coo: { canView: true, canAct: true, label: 'Trials', description: 'Approvals and trial oversight' },
+    operations: { canView: true, canAct: false, label: 'Pilots', description: 'Pilot oversight — view only' },
     sdr: { canView: true, canAct: false, label: 'Trials', description: 'Your trial progress — view only' },
     onboarding: { canView: true, canAct: true, label: 'Trials', description: 'Setup, credentials, and activation' },
   },
   payments: {
     ceo: { canView: true, canAct: true, label: 'Approvals', description: 'Review, payment verification, and client health' },
     coo: { canView: true, canAct: true, label: 'Approvals', description: 'Review, payment verification, and client health' },
+    operations: { canView: true, canAct: false, label: 'Payments', description: 'Payment and client health — view only' },
     sdr: { canView: true, canAct: false, label: 'Clients', description: 'Your conversions — view only' },
     onboarding: { canView: true, canAct: false, label: 'Clients', description: 'Client status — view only' },
   },
   team: {
     ceo: { canView: true, canAct: true, label: 'Team Performance', description: 'Attendance, KPI, leave, compensation, and team management' },
     coo: { canView: true, canAct: true, label: 'Team Performance', description: 'Attendance, KPI, leave, compensation, and team management' },
+    operations: { canView: true, canAct: false, label: 'Team Performance', description: 'Attendance, KPI, and leave — view only' },
     sdr: { canView: true, canAct: false, label: 'My Performance', description: 'Your attendance, KPI, and leave' },
     onboarding: { canView: true, canAct: false, label: 'My Performance', description: 'Your attendance, KPI, and leave' },
   },
   directives: {
     ceo: { canView: true, canAct: true, label: 'Directives', description: 'Track priorities sent to your team' },
     coo: { canView: true, canAct: true, label: 'Directives', description: 'Track priorities sent to your team' },
+    operations: { canView: true, canAct: false, label: 'Directives', description: 'Priorities — view only' },
     sdr: { canView: true, canAct: true, label: 'Directives', description: 'Priorities from leadership' },
     onboarding: { canView: true, canAct: true, label: 'Directives', description: 'Priorities from leadership' },
   },
   contacts: {
     ceo: { canView: true, canAct: false, label: 'Contacts', description: 'All contacts' },
     coo: { canView: true, canAct: false, label: 'Contacts', description: 'All contacts' },
+    operations: { canView: true, canAct: false, label: 'Contacts', description: 'All contacts' },
     sdr: { canView: true, canAct: true, label: 'My Contacts', description: 'Your contacts' },
     onboarding: { canView: true, canAct: false, label: 'Contacts', description: 'Contact directory' },
   },
   calendar: {
     ceo: { canView: true, canAct: false, label: 'Calendar', description: 'All meetings' },
     coo: { canView: true, canAct: false, label: 'Calendar', description: 'All meetings' },
+    operations: { canView: true, canAct: false, label: 'Calendar', description: 'All meetings' },
     sdr: { canView: true, canAct: true, label: 'My Calendar', description: 'Your meetings' },
     onboarding: { canView: true, canAct: true, label: 'My Calendar', description: 'Your check-ins' },
   },
   settings: {
     ceo: { canView: true, canAct: true, label: 'Settings', description: 'System configuration' },
     coo: { canView: true, canAct: true, label: 'Settings', description: 'System configuration' },
+    operations: { canView: true, canAct: false, label: 'Settings', description: 'System configuration — view only' },
     sdr: { canView: false, canAct: false, label: '', description: '' },
     onboarding: { canView: false, canAct: false, label: '', description: '' },
   },
@@ -214,6 +224,7 @@ export function getOnboardingLabel(lead: Lead): { label: string; detail: string 
 export const DIRECTIVE_TYPES_BY_ROLE: Record<CRMRole, string[]> = {
   ceo: ['call_now', 'book_meeting', 'push_conversion', 'confirm_payment', 'approve_trial', 'escalate_update', 'review_blocker', 'review_queue'],
   coo: ['call_now', 'book_meeting', 'push_conversion', 'confirm_payment', 'approve_trial', 'escalate_update', 'review_blocker', 'review_queue'],
+  operations: [],
   sdr: [],
   onboarding: [],
 };
@@ -229,6 +240,8 @@ export function getTeamSections(role: CRMRole): TeamSection[] {
   switch (role) {
     case 'ceo':
     case 'coo':
+      return ['team_attendance', 'team_kpi', 'team_leave', 'people', 'audit'];
+    case 'operations':
       return ['team_attendance', 'team_kpi', 'team_leave', 'people', 'audit'];
     case 'sdr':
     case 'onboarding':

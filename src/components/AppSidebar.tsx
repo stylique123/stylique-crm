@@ -20,6 +20,7 @@ function getNavItems(role: string): { main: NavItem[]; more: NavItem[] } {
   switch (role) {
     case 'ceo':
     case 'coo':
+    case 'operations':
       return {
         main: [
           { title: 'Command Center', url: '/dashboard', icon: LayoutDashboard },
@@ -30,7 +31,7 @@ function getNavItems(role: string): { main: NavItem[]; more: NavItem[] } {
           { title: 'Calendar', url: '/calendar', icon: Calendar },
           { title: 'Attendance', url: '/team', icon: Clock },
         ],
-        more: [
+        more: role === 'operations' ? [] : [
           { title: 'Settings', url: '/admin', icon: SettingsIcon },
         ],
       };
@@ -71,11 +72,14 @@ export function AppSidebar() {
       <SidebarContent>
         <div className={`px-4 py-4 ${collapsed ? 'px-2' : ''}`}>
           {collapsed ? (
-            <span className="block text-center text-base font-semibold text-primary">S</span>
+            <img src="/stylique-logo.svg" alt="Stylique" className="mx-auto h-7 w-7" />
           ) : (
-            <span className="text-lg font-semibold tracking-tight text-sidebar-accent-foreground">
-              Stylique <span className="text-primary/70 font-normal text-xs ml-1">CRM</span>
-            </span>
+            <div className="flex items-center gap-2">
+              <img src="/stylique-logo.svg" alt="Stylique" className="h-8 w-8 shrink-0" />
+              <span className="text-lg font-semibold tracking-tight text-sidebar-accent-foreground">
+                Stylique <span className="text-primary/70 font-normal text-xs ml-1">CRM</span>
+              </span>
+            </div>
           )}
         </div>
 

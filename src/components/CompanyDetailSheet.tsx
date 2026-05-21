@@ -115,7 +115,7 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
   const [noteText, setNoteText] = useState('');
   const { companies: leads, activities: allActivities, saveCompany, addActivity: addAct } = useCompanyStore();
   const { currentUser, role } = useUser();
-  const viewerRole: ViewerRole = role === 'ceo' || role === 'coo' ? role : role === 'onboarding' ? 'onboarding' : 'sdr';
+  const viewerRole: ViewerRole = role === 'ceo' || role === 'coo' || role === 'operations' ? role : role === 'onboarding' ? 'onboarding' : 'sdr';
 
   const bridge = useMemo(() => ({ saveCompany, addActivity: addAct }), [saveCompany, addAct]);
 

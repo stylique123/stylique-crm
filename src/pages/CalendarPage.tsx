@@ -41,7 +41,7 @@ export default function CalendarPage() {
 
   const bridge = useMemo(() => ({ saveCompany, addActivity }), [saveCompany, addActivity]);
 
-  const viewerRole: ViewerRole = role === 'ceo' || role === 'coo' ? role : role === 'onboarding' ? 'onboarding' : 'sdr';
+  const viewerRole: ViewerRole = role === 'ceo' || role === 'coo' || role === 'operations' ? role : role === 'onboarding' ? 'onboarding' : 'sdr';
 
   // Canonical meetings — source of truth
   const allMeetings: FlatMeeting[] = useMemo(

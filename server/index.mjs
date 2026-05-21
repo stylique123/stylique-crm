@@ -235,8 +235,8 @@ async function ingestBookDemo(body, user) {
   const companyName = String(body.companyName || body.company || body.brand || '').trim();
   const contactName = String(body.contactName || body.name || '').trim();
   const contactEmail = String(body.contactEmail || body.email || '').trim();
-  if (!companyName || !contactName || !contactEmail) {
-    return { status: 400, body: { ok: false, error: 'companyName, contactName, and contactEmail are required' } };
+  if (!companyName || !contactName) {
+    return { status: 400, body: { ok: false, error: 'companyName and contactName are required' } };
   }
 
   const now = new Date().toISOString();

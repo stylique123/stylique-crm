@@ -55,6 +55,10 @@ export function resolveAction(lead: Lead, viewerRole: ViewerRole, currentUser: s
   }
 
   if (viewerRole === 'ceo' || viewerRole === 'coo') return resolveLeadershipAction(lead, cs);
+  if (viewerRole === 'operations') {
+    const action = resolveLeadershipAction(lead, cs);
+    return { ...action, canAct: false, readOnlyLabel: action.readOnlyLabel || 'View only' };
+  }
   if (viewerRole === 'onboarding') return resolveOnboardingAction(lead, cs, canAct);
   return resolveSDRAction(lead, cs, canAct, currentUser);
 }
