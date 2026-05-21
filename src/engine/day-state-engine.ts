@@ -101,6 +101,22 @@ function dayOfWeekInTZ(timezone?: string): number {
   }
 }
 
+function parseTimeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+function normalizeForShift(timeMinutes: number, shiftStartMinutes: number, shiftEndMinutes: number): {
+  current: number;
+  end: number;
+} {
+  if (shiftEndMinutes > shiftStartMinutes) return { current: timeMinutes, end: shiftEndMinutes };
+  return {
+    current: timeMinutes < shiftEndMinutes ? timeMinutes + 1440 : timeMinutes,
+    end: shiftEndMinutes + 1440,
+  };
+}
+
 export interface DayStateInput {
   checkInTime?: string;
   checkOutTime?: string;
@@ -168,20 +184,18 @@ export function computeDayState(input: DayStateInput): DayStateResult {
     }
 
     const localTime = nowTimeInTZ(input.timezone);
-    const [h, m] = localTime.split(':').map(Number);
-    const nowMins = h * 60 + m;
-    const [sh, sm] = input.shiftStart.split(':').map(Number);
-    const shiftMins = sh * 60 + sm;
-    const [eh, em] = input.shiftEnd.split(':').map(Number);
-    const shiftEndMins = eh * 60 + em;
+    const nowMins = parseTimeToMinutes(localTime);
+    const shiftMins = parseTimeToMinutes(input.shiftStart);
+    const shiftEndMins = parseTimeToMinutes(input.shiftEnd);
+    const normalized = normalizeForShift(nowMins, shiftMins, shiftEndMins);
 
-    if (nowMins < shiftMins) {
+    if (normalized.current < shiftMins) {
       return { ...base, state: 'not_due_yet', label: 'Not Due Yet', managerLabel: `Shift starts at ${input.shiftStart}`, color: DAY_STATE_COLORS.not_due_yet };
     }
-    if (nowMins <= shiftMins + input.graceMinutes) {
+    if (normalized.current <= shiftMins + input.graceMinutes) {
       return { ...base, state: 'not_checked_in', label: 'Not Checked In', managerLabel: `Within grace period (${input.graceMinutes}min)`, color: DAY_STATE_COLORS.not_checked_in };
     }
-    if (nowMins > shiftEndMins) {
+    if (normalized.current > normalized.end) {
       return {
         ...base, state: 'absent', label: 'Absent',
         managerLabel: 'Shift ended — no check-in',
@@ -202,10 +216,10 @@ export function computeDayState(input: DayStateInput): DayStateResult {
   }
 
   if (input.checkInTime) {
-    const [sh, sm] = input.shiftStart.split(':').map(Number);
-    const shiftStartMins = sh * 60 + sm;
-    const [ch, cm] = input.checkInTime.split(':').map(Number);
-    const checkInMins = ch * 60 + cm;
+    const shiftStartMins = parseTimeToMinutes(input.shiftStart);
+    const shiftEndMins = parseTimeToMinutes(input.shiftEnd);
+    const checkInRawMins = parseTimeToMinutes(input.checkInTime);
+    const checkInMins = shiftEndMins <= shiftStartMins && checkInRawMins < shiftEndMins ? checkInRawMins + 1440 : checkInRawMins;
     const lateBy = Math.max(0, checkInMins - shiftStartMins - input.graceMinutes);
     const isLate = lateBy > 0;
 
@@ -214,11 +228,10 @@ export function computeDayState(input: DayStateInput): DayStateResult {
     let hoursWorked = 0;
 
     if (input.checkOutTime) {
-      const [oh, om] = input.checkOutTime.split(':').map(Number);
-      const checkOutMins = oh * 60 + om;
-      const [eh, em] = input.shiftEnd.split(':').map(Number);
-      const shiftEndMins = eh * 60 + em;
-      earlyLeaveBy = Math.max(0, shiftEndMins - checkOutMins);
+      const checkOutRawMins = parseTimeToMinutes(input.checkOutTime);
+      const checkOutMins = checkOutRawMins < checkInMins ? checkOutRawMins + 1440 : checkOutRawMins;
+      const normalizedShiftEnd = shiftEndMins <= shiftStartMins ? shiftEndMins + 1440 : shiftEndMins;
+      earlyLeaveBy = Math.max(0, normalizedShiftEnd - checkOutMins);
       isEarly = earlyLeaveBy > 15;
       hoursWorked = Math.max(0, (checkOutMins - checkInMins) / 60);
     } else if (input.hoursLogged) {

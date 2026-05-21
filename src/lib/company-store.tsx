@@ -10,7 +10,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Lead, Activity } from '@/types/crm';
 import { getLeads, saveLead as persistLead, deleteLead as removeLead, getActivities, addActivity as persistActivity, replaceLeads, replaceActivities, uid } from '@/lib/store';
-import { getApiToken, getStateBucket } from '@/lib/backend-api';
+import { getApiToken, getStateBucket, saveStateBucket } from '@/lib/backend-api';
 import { generateLeadKey } from '@/lib/lead-key';
 import { deduplicateActiveTasks, appendAuditEntry, createAuditEntry } from '@/engine/hardening';
 import { crmEventBus } from '@/engine/event-bus';
@@ -51,13 +51,19 @@ export function CompanyStoreProvider({ children }: { children: React.ReactNode }
       getStateBucket<Activity>('activities').catch(() => null),
     ]).then(([remoteLeads, remoteActivities]) => {
       if (cancelled) return;
-      if (Array.isArray(remoteLeads)) {
+      if (Array.isArray(remoteLeads) && remoteLeads.length > 0) {
         replaceLeads(remoteLeads);
         setCompanies(remoteLeads);
+      } else if (Array.isArray(remoteLeads) && remoteLeads.length === 0) {
+        const localLeads = getLeads();
+        if (localLeads.length > 0) saveStateBucket('leads', localLeads).catch(() => {});
       }
-      if (Array.isArray(remoteActivities)) {
+      if (Array.isArray(remoteActivities) && remoteActivities.length > 0) {
         replaceActivities(remoteActivities);
         setActivities(remoteActivities);
+      } else if (Array.isArray(remoteActivities) && remoteActivities.length === 0) {
+        const localActivities = getActivities();
+        if (localActivities.length > 0) saveStateBucket('activities', localActivities).catch(() => {});
       }
     });
     return () => { cancelled = true; };

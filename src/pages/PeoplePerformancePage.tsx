@@ -303,7 +303,7 @@ function OverviewTab({ onOpenProfile }: { onOpenProfile: (id: string) => void })
                   <Button size="sm" onClick={() => {
                     const emp = empStore.getEmployee(currentUser);
                     const hasLeave = leave.hasApprovedLeaveToday(currentUser);
-                    const result = attendance.checkIn(currentUser, emp?.shiftStart, emp?.graceMinutes, hasLeave, emp?.timezone);
+                    const result = attendance.checkIn(currentUser, emp?.shiftStart, emp?.graceMinutes, hasLeave, emp?.timezone, emp?.shiftEnd);
                     if (result.success) toast.success('Checked in');
                     else toast.error(result.message || 'Check-in blocked');
                   }}><LogIn className="h-3.5 w-3.5 mr-1" /> Check In</Button>

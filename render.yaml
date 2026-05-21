@@ -6,6 +6,10 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /health
+    disks:
+      - name: stylique-crm-data
+        mountPath: /var/data
+        sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -14,6 +18,6 @@ services:
       - key: STYLIQUE_STATIC_DIR
         value: ./dist
       - key: STYLIQUE_DATA_DIR
-        value: /tmp/stylique-crm-data
+        value: /var/data
       - key: VITE_REQUIRE_BACKEND_AUTH
         value: true

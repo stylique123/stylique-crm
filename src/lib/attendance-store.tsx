@@ -134,6 +134,22 @@ function dayOfWeekInTZ(timezone?: string): number {
   }
 }
 
+function parseTimeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+function normalizeForShift(timeMinutes: number, shiftStartMinutes: number, shiftEndMinutes: number): {
+  current: number;
+  end: number;
+} {
+  if (shiftEndMinutes > shiftStartMinutes) return { current: timeMinutes, end: shiftEndMinutes };
+  return {
+    current: timeMinutes < shiftEndMinutes ? timeMinutes + 1440 : timeMinutes,
+    end: shiftEndMinutes + 1440,
+  };
+}
+
 /**
  * Derive the real-time attendance status for display, considering shift times.
  * Does NOT mutate the store — pure derivation for UI.
@@ -166,16 +182,13 @@ export function deriveAttendanceStatus(
 
   // Get current time in employee's timezone
   const localTime = nowTimeInTZ(timezone);
-  const [h, m] = localTime.split(':').map(Number);
-  const nowMinutes = h * 60 + m;
-
-  const [sh, sm] = shift.split(':').map(Number);
-  const shiftStartMin = sh * 60 + sm;
+  const nowMinutes = parseTimeToMinutes(localTime);
+  const shiftStartMin = parseTimeToMinutes(shift);
 
   // Parse shift end
   const end = shiftEnd || '17:00';
-  const [eh, em] = end.split(':').map(Number);
-  const shiftEndMin = eh * 60 + em;
+  const shiftEndMin = parseTimeToMinutes(end);
+  const normalized = normalizeForShift(nowMinutes, shiftStartMin, shiftEndMin);
 
   // Check weekend in employee's timezone
   const day = dayOfWeekInTZ(timezone);
@@ -184,17 +197,17 @@ export function deriveAttendanceStatus(
   }
 
   // Before shift start
-  if (nowMinutes < shiftStartMin) {
+  if (normalized.current < shiftStartMin) {
     return { status: 'not_due_yet', label: 'Not Due Yet' };
   }
 
   // Within grace period
-  if (nowMinutes <= shiftStartMin + grace) {
+  if (normalized.current <= shiftStartMin + grace) {
     return { status: 'not_checked_in', label: 'Not Checked In' };
   }
 
   // Past grace but before shift end — late / absent
-  if (nowMinutes <= shiftEndMin) {
+  if (normalized.current <= normalized.end) {
     return { status: 'not_checked_in', label: 'Not Checked In' };
   }
 
@@ -206,7 +219,7 @@ interface AttendanceContextValue {
   entries: AttendanceEntry[];
   getToday: (userId: string, timezone?: string) => AttendanceEntry | undefined;
   getForDate: (userId: string, date: string) => AttendanceEntry | undefined;
-  checkIn: (userId: string, shiftStart?: string, graceMinutes?: number, hasApprovedLeave?: boolean, timezone?: string) => { success: boolean; message?: string };
+  checkIn: (userId: string, shiftStart?: string, graceMinutes?: number, hasApprovedLeave?: boolean, timezone?: string, shiftEnd?: string) => { success: boolean; message?: string };
   checkOut: (userId: string, timezone?: string, shiftEnd?: string) => void;
   requestLeave: (userId: string, date: string, reason: string) => void;
   approveLeave: (userId: string, date: string, approver: string) => void;
@@ -267,7 +280,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     return entries.find(e => e.userId === userId && e.date === date);
   }, [entries]);
 
-  const checkIn = useCallback((userId: string, employeeShiftStart?: string, employeeGraceMinutes?: number, hasApprovedLeave?: boolean, employeeTimezone?: string): { success: boolean; message?: string } => {
+  const checkIn = useCallback((userId: string, employeeShiftStart?: string, employeeGraceMinutes?: number, hasApprovedLeave?: boolean, employeeTimezone?: string, employeeShiftEnd?: string): { success: boolean; message?: string } => {
     // Block check-in if approved leave exists for today
     if (hasApprovedLeave) {
       return { success: false, message: 'You are on approved leave for this shift. Check-in is blocked. Contact admin for override.' };
@@ -278,10 +291,13 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     const dateKey = todayKeyInTZ(employeeTimezone);
     const shiftStart = employeeShiftStart || '09:00';
     const grace = employeeGraceMinutes ?? 15;
-    const [sh, sm] = shiftStart.split(':').map(Number);
-    const thresholdMinutes = sh * 60 + sm + grace;
-    const [ch, cm] = time.split(':').map(Number);
-    const currentMinutes = ch * 60 + cm;
+    const shiftStartMinutes = parseTimeToMinutes(shiftStart);
+    const shiftEndMinutes = parseTimeToMinutes(employeeShiftEnd || '17:00');
+    const currentRawMinutes = parseTimeToMinutes(time);
+    const currentMinutes = shiftEndMinutes <= shiftStartMinutes && currentRawMinutes < shiftEndMinutes
+      ? currentRawMinutes + 1440
+      : currentRawMinutes;
+    const thresholdMinutes = shiftStartMinutes + grace;
     const isLate = currentMinutes > thresholdMinutes;
     upsert(userId, dateKey, {
       status: isLate ? 'late' : 'present',
@@ -297,12 +313,21 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     const time = nowTimeInTZ(employeeTimezone);
     let hours = 0;
     if (entry?.checkInTime) {
-      const [ih, im] = entry.checkInTime.split(':').map(Number);
-      const [oh, om] = time.split(':').map(Number);
-      hours = Math.max(0, (oh * 60 + om - ih * 60 - im) / 60);
+      const inMinutes = parseTimeToMinutes(entry.checkInTime);
+      const outRawMinutes = parseTimeToMinutes(time);
+      const outMinutes = outRawMinutes < inMinutes ? outRawMinutes + 1440 : outRawMinutes;
+      hours = Math.max(0, (outMinutes - inMinutes) / 60);
     }
     const shiftEnd = employeeShiftEnd || '17:00';
-    const isEarlyLeave = time < shiftEnd;
+    const shiftEndMinutes = parseTimeToMinutes(shiftEnd);
+    const checkoutRawMinutes = parseTimeToMinutes(time);
+    const comparisonCheckout = shiftEndMinutes <= parseTimeToMinutes(entry?.checkInTime || '00:00') && checkoutRawMinutes < shiftEndMinutes
+      ? checkoutRawMinutes + 1440
+      : checkoutRawMinutes;
+    const comparisonShiftEnd = shiftEndMinutes <= parseTimeToMinutes(entry?.checkInTime || '00:00')
+      ? shiftEndMinutes + 1440
+      : shiftEndMinutes;
+    const isEarlyLeave = comparisonCheckout < comparisonShiftEnd;
     upsert(userId, dateKey, {
       checkOutTime: time,
       hoursLogged: Math.round(hours * 10) / 10,

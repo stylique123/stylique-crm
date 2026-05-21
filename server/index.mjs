@@ -50,6 +50,13 @@ const CONNECTORS = {
   },
 };
 
+const DEFAULT_AUTH_USERS = {
+  asjad: {
+    password: 'Asjad-CRM-2026!',
+    role: 'sdr',
+  },
+};
+
 let graphTokenCache = { token: '', expiresAt: 0 };
 
 const STATE_BUCKETS = new Set([
@@ -145,8 +152,9 @@ async function getUsers() {
       envUsers = {};
     }
   }
+  const baseUsers = { ...DEFAULT_AUTH_USERS, ...envUsers };
   const stored = await readBucket('auth-users');
-  if (!Array.isArray(stored) || stored.length === 0) return envUsers;
+  if (!Array.isArray(stored) || stored.length === 0) return baseUsers;
   const storedUsers = Object.fromEntries(stored
     .filter(user => user?.id && user?.password)
     .map(user => [String(user.id), {
@@ -154,7 +162,7 @@ async function getUsers() {
       role: String(user.role || envUsers[String(user.id)]?.role || 'user'),
     }])
   );
-  return { ...envUsers, ...storedUsers };
+  return { ...baseUsers, ...storedUsers };
 }
 
 async function listAuthUsers() {

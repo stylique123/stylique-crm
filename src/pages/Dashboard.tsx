@@ -153,7 +153,7 @@ export default function Dashboard() {
             </div>
             <div className="flex gap-2 shrink-0">
               {!todayAttendance?.checkInTime ? (
-                <Button size="sm" className="h-8 text-xs" onClick={() => attendance.checkIn(currentUser, employee?.shiftStart, employee?.graceMinutes, false, employee?.timezone)}>
+                <Button size="sm" className="h-8 text-xs" onClick={() => attendance.checkIn(currentUser, employee?.shiftStart, employee?.graceMinutes, false, employee?.timezone, employee?.shiftEnd)}>
                   Check in
                 </Button>
               ) : !todayAttendance.checkOutTime ? (
