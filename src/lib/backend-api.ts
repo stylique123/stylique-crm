@@ -141,6 +141,18 @@ export async function saveAuthUsers(users: AuthUserRecord[]): Promise<AuthUserRe
   return result.users || [];
 }
 
+export async function getStateBucket<T>(bucket: string): Promise<T[]> {
+  const result = await apiFetch<{ ok: true; data: T[] }>(`/api/state/${bucket}`);
+  return Array.isArray(result.data) ? result.data : [];
+}
+
+export async function saveStateBucket<T>(bucket: string, data: T[]): Promise<void> {
+  await apiFetch<{ ok: true }>(`/api/state/${bucket}`, {
+    method: 'PUT',
+    body: JSON.stringify({ data }),
+  });
+}
+
 export async function pingConnector(key: ConnectorKey): Promise<ConnectorPingResult> {
   if (!getApiBaseUrl()) {
     return { ok: false, configured: false, message: 'Backend URL is not configured' };

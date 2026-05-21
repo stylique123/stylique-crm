@@ -1,5 +1,6 @@
 import { Lead, Activity } from '@/types/crm';
 import { safeId, safeRead, safeWrite } from '@/lib/safe-storage';
+import { getApiToken, saveStateBucket } from '@/lib/backend-api';
 
 const KEYS = {
   leads: 'stylique-crm-leads',
@@ -106,6 +107,13 @@ function write<T>(key: string, data: T[]) {
   safeWrite(key, data);
 }
 
+function syncBucket<T>(bucket: 'leads' | 'activities', data: T[]) {
+  if (!getApiToken()) return;
+  saveStateBucket(bucket, data).catch(error => {
+    console.warn(`[CRM persistence] Could not sync ${bucket}`, error);
+  });
+}
+
 export function uid(): string {
   return safeId('crm');
 }
@@ -117,9 +125,15 @@ export function saveLead(lead: Lead) {
   const idx = leads.findIndex(l => l.id === lead.id);
   if (idx >= 0) leads[idx] = lead; else leads.push(lead);
   write(KEYS.leads, leads);
+  syncBucket('leads', leads);
 }
 export function deleteLead(id: string) {
-  write(KEYS.leads, getLeads().filter(l => l.id !== id));
+  const leads = getLeads().filter(l => l.id !== id);
+  write(KEYS.leads, leads);
+  syncBucket('leads', leads);
+}
+export function replaceLeads(leads: Lead[]) {
+  write(KEYS.leads, leads);
 }
 
 // Activities
@@ -127,5 +141,10 @@ export function getActivities(): Activity[] { return read<Activity>(KEYS.activit
 export function addActivity(activity: Activity) {
   const activities = getActivities();
   activities.unshift(activity);
-  write(KEYS.activities, activities.slice(0, 200));
+  const next = activities.slice(0, 500);
+  write(KEYS.activities, next);
+  syncBucket('activities', next);
+}
+export function replaceActivities(activities: Activity[]) {
+  write(KEYS.activities, activities);
 }

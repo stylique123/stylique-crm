@@ -9,7 +9,8 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Lead, Activity } from '@/types/crm';
-import { getLeads, saveLead as persistLead, deleteLead as removeLead, getActivities, addActivity as persistActivity, uid } from '@/lib/store';
+import { getLeads, saveLead as persistLead, deleteLead as removeLead, getActivities, addActivity as persistActivity, replaceLeads, replaceActivities, uid } from '@/lib/store';
+import { getApiToken, getStateBucket } from '@/lib/backend-api';
 import { generateLeadKey } from '@/lib/lead-key';
 import { deduplicateActiveTasks, appendAuditEntry, createAuditEntry } from '@/engine/hardening';
 import { crmEventBus } from '@/engine/event-bus';
@@ -40,6 +41,26 @@ export function CompanyStoreProvider({ children }: { children: React.ReactNode }
   const refresh = useCallback(() => {
     setCompanies(getLeads());
     setActivities(getActivities());
+  }, []);
+
+  useEffect(() => {
+    if (!getApiToken()) return;
+    let cancelled = false;
+    Promise.all([
+      getStateBucket<Lead>('leads').catch(() => null),
+      getStateBucket<Activity>('activities').catch(() => null),
+    ]).then(([remoteLeads, remoteActivities]) => {
+      if (cancelled) return;
+      if (Array.isArray(remoteLeads)) {
+        replaceLeads(remoteLeads);
+        setCompanies(remoteLeads);
+      }
+      if (Array.isArray(remoteActivities)) {
+        replaceActivities(remoteActivities);
+        setActivities(remoteActivities);
+      }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   // Auto-refresh on event bus emissions — ensures stale cards disappear immediately

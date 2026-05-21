@@ -3,9 +3,10 @@
  * Manages employee profiles, leave policies, compensation rules,
  * payroll calculations, and audit trail.
  */
-import { createContext, useContext, useState, useCallback, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode, useMemo } from 'react';
 import { setTeamMembersFromEmployees } from '@/types/crm';
 import { setTeamFromEmployees as setRolesTeamFromEmployees } from '@/types/roles';
+import { getApiToken, getStateBucket, saveStateBucket } from '@/lib/backend-api';
 
 // ─── Employment Types ───────────────────────────────────
 
@@ -180,7 +181,18 @@ function readJSON<T>(key: string): T[] {
   try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
 }
 function writeJSON<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (error) {
+    console.warn(`[Employee persistence] Could not write ${key} locally`, error);
+  }
+}
+
+function syncEmployees(data: EmployeeProfile[]) {
+  if (!getApiToken()) return;
+  saveStateBucket('employees', data).catch(error => {
+    console.warn('[Employee persistence] Could not sync employees', error);
+  });
 }
 
 // ─── Default Data ───────────────────────────────────────
@@ -577,6 +589,21 @@ export function EmployeeProvider({ children }: { children: ReactNode }) {
   const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>(() => readJSON<PayrollEntry>(KEYS.payroll));
   const [auditLog, setAuditLog] = useState<AuditEntry[]>(() => readJSON<AuditEntry>(KEYS.audit));
 
+  useEffect(() => {
+    if (!getApiToken()) return;
+    let cancelled = false;
+    getStateBucket<EmployeeProfile>('employees')
+      .then(remote => {
+        if (cancelled || !Array.isArray(remote) || remote.length === 0) return;
+        writeJSON(KEYS.employees, remote);
+        setEmployees(remote);
+        setTeamMembersFromEmployees(remote);
+        setRolesTeamFromEmployees(remote);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const saveEmployee = useCallback((emp: EmployeeProfile) => {
     const current = readJSON<EmployeeProfile>(KEYS.employees);
     if (current.length === 0) current.push(...DEFAULT_EMPLOYEES);
@@ -584,6 +611,7 @@ export function EmployeeProvider({ children }: { children: ReactNode }) {
     emp.updatedAt = new Date().toISOString();
     if (idx >= 0) current[idx] = emp; else current.push(emp);
     writeJSON(KEYS.employees, current);
+    syncEmployees(current);
     setEmployees([...current]);
     setTeamMembersFromEmployees(current);
     setRolesTeamFromEmployees(current);

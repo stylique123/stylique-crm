@@ -34,7 +34,7 @@ import { toast } from 'sonner';
 const LEAD_FIELDS = [
   { key: 'companyName', label: 'Company Name', required: true },
   { key: 'contactName', label: 'Contact Name', required: true },
-  { key: 'contactEmail', label: 'Email', required: true },
+  { key: 'contactEmail', label: 'Email', required: false },
   { key: 'contactPhone', label: 'Phone', required: false },
   { key: 'website', label: 'Website', required: false },
   { key: 'instagram', label: 'Instagram', required: false },
@@ -296,7 +296,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       if (!row.selected || row.action === 'skip') { skipped++; continue; }
 
       const m = row.mapped;
-      if (!m.companyName || !m.contactName || !m.contactEmail) { errors++; continue; }
+      if (!m.companyName || !m.contactName) { errors++; continue; }
 
       if (row.action === 'merge' && row.duplicateId) {
         // Merge into existing brand record. Brands are canonical; people are contacts.
@@ -368,7 +368,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         id: uid(),
         companyName: m.companyName.trim(),
         contactName: m.contactName.trim(),
-        contactEmail: m.contactEmail.trim(),
+        contactEmail: m.contactEmail?.trim() || '',
         contactPhone: m.contactPhone?.trim() || undefined,
         website: m.website?.trim() || undefined,
         instagram: m.instagram?.trim() || undefined,
@@ -376,7 +376,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         contacts: [{
           id: primaryContactId,
           name: m.contactName.trim(),
-          email: m.contactEmail.trim() || undefined,
+          email: m.contactEmail?.trim() || undefined,
           phone: m.contactPhone?.trim() || undefined,
           linkedin: m.linkedin?.trim() || undefined,
           instagram: m.instagram?.trim() || undefined,
@@ -440,8 +440,8 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   };
 
   const dupeCount = parsedRows.filter(r => r.isDuplicate).length;
-  const validCount = parsedRows.filter(r => r.mapped.companyName && r.mapped.contactName && r.mapped.contactEmail).length;
-  const hasRequiredFields = !!(fieldMapping && Object.values(fieldMapping).includes('companyName') && Object.values(fieldMapping).includes('contactName') && Object.values(fieldMapping).includes('contactEmail'));
+  const validCount = parsedRows.filter(r => r.mapped.companyName && r.mapped.contactName).length;
+  const hasRequiredFields = !!(fieldMapping && Object.values(fieldMapping).includes('companyName') && Object.values(fieldMapping).includes('contactName'));
 
   const createDemoLead = async () => {
     if (!demoCompany.trim() || !demoContact.trim() || !demoEmail.trim()) {
@@ -589,7 +589,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                   <Upload className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3" />
                   <p className="text-sm font-medium">Click to upload CSV</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Columns: Company, Contact, Email, Phone, Source, Geography, Platform, Notes
+                    Columns: Company and Contact are required. Email, Phone, Source, Geography, Platform, Notes are optional.
                   </p>
                 </div>
                 <input
@@ -639,7 +639,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                 {!hasRequiredFields && (
                   <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/10 text-destructive text-xs">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    Map Company Name, Contact Name, and Email (required)
+                    Map Company Name and Contact Name. Email is optional.
                   </div>
                 )}
 
@@ -696,7 +696,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
                 <ScrollArea className="max-h-64">
                   <div className="space-y-1.5">
                     {parsedRows.map((row, idx) => {
-                      const valid = !!(row.mapped.companyName && row.mapped.contactName && row.mapped.contactEmail);
+                      const valid = !!(row.mapped.companyName && row.mapped.contactName);
                       return (
                         <div
                           key={idx}
