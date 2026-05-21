@@ -14,12 +14,13 @@ function getActiveLoginMembers() {
       const raw = window.localStorage.getItem('stylique-employees');
       const employees = raw ? JSON.parse(raw) : null;
       if (Array.isArray(employees) && employees.length) {
+        const knownEmployeeIds = new Set(employees.map(emp => String(emp.id)));
         const active = employees
           .filter(emp => emp.active !== false)
           .map(emp => ({ id: String(emp.id), name: String(emp.fullName || emp.name || emp.id) }));
         const merged = [...active];
         for (const member of TEAM_MEMBERS) {
-          if (!merged.some(emp => emp.id === member.id)) merged.push(member);
+          if (!knownEmployeeIds.has(member.id) && !merged.some(emp => emp.id === member.id)) merged.push(member);
         }
         if (merged.length) return merged;
       }

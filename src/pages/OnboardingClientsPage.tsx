@@ -42,7 +42,7 @@ export default function OnboardingClientsPage() {
   const bridge = useMemo(() => ({ saveCompany, addActivity }), [saveCompany]);
   const { isOnboarding, role, currentUser, userName, isSdr, isLeadership } = useUser();
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<'active' | 'review' | 'onboarding' | 'pilot' | 'contract' | 'due-soon' | 'overdue' | 'history'>('active');
+  const [view, setView] = useState<'active' | 'review' | 'onboarding' | 'pilot' | 'due-soon' | 'overdue' | 'history'>('active');
   const [selected, setSelected] = useState<Lead | null>(null);
   const [reviewLead, setReviewLead] = useState<Lead | null>(null);
   const [credLead, setCredLead] = useState<Lead | null>(null);
@@ -56,7 +56,6 @@ export default function OnboardingClientsPage() {
     if (id === 'review') setView('review');
     if (id === 'queue') setView('onboarding');
     if (id === 'pilot') setView('pilot');
-    if (id === 'contract') setView('contract');
     if (id === 'active') setView('active');
     if (id === 'overdue') setView('overdue');
     const el = document.getElementById(id);
@@ -83,11 +82,10 @@ export default function OnboardingClientsPage() {
   const isClientReview = (c: Lead) => ['client_review', 'conversion_pending'].includes(getCommercialState(c));
   const isOnboardingPending = (c: Lead) => getCommercialState(c) === 'onboarding_pending';
   const isPilot = (c: Lead) => getCommercialState(c) === 'pilot';
-  const isContract = (c: Lead) => getCommercialState(c) === 'contract' || c.stage === 'converted';
   const isDueSoon = (c: Lead) => getCommercialState(c) === 'payment_due_soon';
   const isActive = (c: Lead) => {
     const state = getCommercialState(c);
-    return state === 'active_client' || state === 'pilot' || state === 'contract';
+    return state === 'active_client' || state === 'payment_due_soon' || state === 'overdue';
   };
   const isOverdue = (c: Lead) => getCommercialState(c) === 'overdue';
   const isClosed = (c: Lead) => c.stage === 'closed-lost' || c.stage === 'unsubscribed';
@@ -104,7 +102,6 @@ export default function OnboardingClientsPage() {
   // True onboarding queue — paid AND credentials saved.
   const queue = useMemo(() => allPending.filter(c => hasValidCredentials(c)), [allPending]);
   const pilot = useMemo(() => scoped.filter(isPilot).filter(matches), [scoped, query]);
-  const contract = useMemo(() => scoped.filter(isContract).filter(matches), [scoped, query]);
   const active = useMemo(() => scoped
     .filter(isActive).filter(matches)
     .sort((a, b) => a.companyName.localeCompare(b.companyName))
@@ -201,7 +198,6 @@ export default function OnboardingClientsPage() {
         {!isOnboarding && <ViewButton label={`Client Review · ${review.length}`} active={view === 'review'} onClick={() => setView('review')} />}
         <ViewButton label={`${isOnboarding ? 'Onboarding Tasks' : 'Onboarding Queue'} · ${queue.length}`} active={view === 'onboarding'} onClick={() => setView('onboarding')} />
         <ViewButton label={`Pilot · ${pilot.length}`} active={view === 'pilot'} onClick={() => setView('pilot')} />
-        <ViewButton label={`Contract · ${contract.length}`} active={view === 'contract'} onClick={() => setView('contract')} />
         {!isOnboarding && <ViewButton label={`Due Soon · ${dueSoon.length}`} active={view === 'due-soon'} onClick={() => setView('due-soon')} />}
         {!isOnboarding && <ViewButton label={`Overdue · ${overdue.length}`} active={view === 'overdue'} onClick={() => setView('overdue')} />}
         {!isOnboarding && <ViewButton label={`History · ${closed.length}`} active={view === 'history'} onClick={() => setView('history')} />}
@@ -238,7 +234,7 @@ export default function OnboardingClientsPage() {
                           <Badge variant="outline" className="text-[10px]">{PLAN_LABELS[c.subscriptionPlan]}</Badge>
                         )}
                         <Badge variant="outline" className="text-[10px] text-success border-success/30">
-                          {c.stage === 'trial-active' ? 'Pilot' : c.stage === 'converted' ? 'Contract' : 'Active'}
+                          Active
                         </Badge>
                       </div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">
@@ -348,17 +344,6 @@ export default function OnboardingClientsPage() {
           empty="No pilots running."
           items={pilot}
           badge="Pilot"
-          onSelect={setSelected}
-        />
-      )}
-
-      {view === 'contract' && (
-        <ClientListSection
-          id="contract"
-          title={`Contract · ${contract.length}`}
-          empty="No contract clients yet."
-          items={contract}
-          badge="Contract"
           onSelect={setSelected}
         />
       )}

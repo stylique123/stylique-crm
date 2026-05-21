@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 import { getCommercialState } from '@/engine/commercial-state';
 
 type ContactFilter = 'all' | 'active_leads' | 'meeting_stage' | 'decision_pending' | 'cold' | 'clients' | 'closed';
-type LeadershipFilter = 'all' | 'active_leads' | 'client_review' | 'onboarding_queue' | 'active_clients' | 'pilot' | 'contract' | 'overdue' | 'history';
+type LeadershipFilter = 'all' | 'active_leads' | 'client_review' | 'onboarding_queue' | 'active_clients' | 'pilot' | 'overdue' | 'history';
 type OnboardingFilter = 'all' | 'onboarding_queue' | 'active_clients';
 
 const FLOW_ICONS: Record<string, typeof Inbox> = {
@@ -46,7 +46,6 @@ function getLeadershipGroup(lead: Lead): LeadershipFilter {
   if (state === 'conversion_pending' || state === 'client_review') return 'client_review';
   if (state === 'onboarding_pending') return hasValidCredentials(lead) ? 'onboarding_queue' : 'client_review';
   if (state === 'pilot') return 'pilot';
-  if (state === 'contract') return 'contract';
   if (state === 'active_client' || state === 'payment_due_soon') return 'active_clients';
   if (state === 'overdue') return 'overdue';
   if (state === 'closed_lost' || state === 'closed') return 'history';
@@ -56,7 +55,7 @@ function getLeadershipGroup(lead: Lead): LeadershipFilter {
 function getOnboardingGroup(lead: Lead): OnboardingFilter {
   const state = getCommercialState(lead);
   if (state === 'onboarding_pending' && hasValidCredentials(lead)) return 'onboarding_queue';
-  if (state === 'active_client' || state === 'payment_due_soon' || state === 'pilot' || state === 'contract') return 'active_clients';
+  if (state === 'active_client' || state === 'payment_due_soon' || state === 'pilot') return 'active_clients';
   return 'onboarding_queue';
 }
 
@@ -77,7 +76,7 @@ export default function ContactsPage() {
         if (l.assigned_onboarding_owner === currentUser) return true;
         const state = getCommercialState(l);
         if (state === 'onboarding_pending' && hasValidCredentials(l)) return true;
-        if (state === 'active_client' || state === 'payment_due_soon' || state === 'pilot' || state === 'contract') return true;
+        if (state === 'active_client' || state === 'payment_due_soon' || state === 'pilot') return true;
         return false;
       });
     }
@@ -114,7 +113,7 @@ export default function ContactsPage() {
   }, [baseLeads]);
 
   const leadershipCounts = useMemo(() => {
-    const c = { all: baseLeads.length, active_leads: 0, client_review: 0, onboarding_queue: 0, active_clients: 0, pilot: 0, contract: 0, overdue: 0, history: 0 };
+    const c = { all: baseLeads.length, active_leads: 0, client_review: 0, onboarding_queue: 0, active_clients: 0, pilot: 0, overdue: 0, history: 0 };
     baseLeads.forEach(l => { c[getLeadershipGroup(l)]++; });
     return c;
   }, [baseLeads]);
@@ -164,7 +163,6 @@ export default function ContactsPage() {
             { key: 'client_review' as const, label: 'Client Review', count: leadershipCounts.client_review },
             { key: 'onboarding_queue' as const, label: 'Onboarding Queue', count: leadershipCounts.onboarding_queue },
             { key: 'pilot' as const, label: 'Pilot', count: leadershipCounts.pilot },
-            { key: 'contract' as const, label: 'Contract', count: leadershipCounts.contract },
             { key: 'active_clients' as const, label: 'Active Clients', count: leadershipCounts.active_clients },
             { key: 'overdue' as const, label: 'Overdue', count: leadershipCounts.overdue },
             { key: 'history' as const, label: 'History', count: leadershipCounts.history },

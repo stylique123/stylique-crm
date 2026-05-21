@@ -56,7 +56,7 @@ describe('Stylique CRM high-volume flow hardening', () => {
     localStorage.clear();
   });
 
-  it('runs 1200 records through SDR, CEO, onboarding, pilot, contract/lost scenarios without state overlap', () => {
+  it('runs 1200 records through SDR, CEO, onboarding, pilot, active/lost scenarios without state overlap', () => {
     const store = new Map<string, Lead>();
     const activities: Activity[] = [];
     const bridge = makeBridge(store, activities);
@@ -115,7 +115,7 @@ describe('Stylique CRM high-volume flow hardening', () => {
       expect(lead.credentials?.username).toBeTruthy();
       expect(getLedger(lead).filter(e => e.status === 'paid')).toHaveLength(1);
 
-      // Onboarding verifies. This starts paid Pilot, not Contract.
+      // Onboarding verifies. This starts paid Pilot, not Active Client.
       const pilot = executeTrialActivation(lead, 'muneeb', bridge, 30);
       expect(pilot.success).toBe(true);
       lead = current(store, lead);
@@ -125,18 +125,18 @@ describe('Stylique CRM high-volume flow hardening', () => {
       expect(lead.pilotEndDate).toBeTruthy();
       expect(getCurrentBillingEntry(lead)).toBeTruthy();
 
-      // After pilot, decision is Contract or Lost. It must not go back to payment.
+      // After pilot, decision is Active Client or Lost. It must not go back to payment.
       const decisionTask = lead.tasks.find(t => t.type === 'conversion-push' && !t.completed);
       if (scenario === 1) {
-        processTaskOutcome(lead, 'lost', 'Pilot ended; client did not sign contract.', decisionTask?.id, 'conversion-push', lead.assignedTo, bridge);
+        processTaskOutcome(lead, 'lost', 'Pilot ended; client did not become active.', decisionTask?.id, 'conversion-push', lead.assignedTo, bridge);
         lead = current(store, lead);
         expect(lead.stage).toBe('closed-lost');
         expect(lead.pilotDecision).toBe('lost');
       } else {
-        processTaskOutcome(lead, 'interested', 'Pilot completed and 3-month contract signed.', decisionTask?.id, 'conversion-push', lead.assignedTo, bridge);
+        processTaskOutcome(lead, 'interested', 'Pilot completed and client became active.', decisionTask?.id, 'conversion-push', lead.assignedTo, bridge);
         lead = current(store, lead);
         expect(lead.stage).toBe('converted');
-        expect(getCommercialState(lead)).toBe('contract');
+        expect(getCommercialState(lead)).toBe('active_client');
         expect(lead.contractSignedAt).toBeTruthy();
       }
     }
@@ -151,7 +151,7 @@ describe('Stylique CRM high-volume flow hardening', () => {
       const state = getCommercialState(lead);
       if (state === 'overdue' && lead.stage !== 'converted') return true;
       if (state === 'pilot' && (!lead.paymentReceivedAt || !lead.onboardingDoneAt)) return true;
-      if (state === 'contract' && !lead.contractSignedAt) return true;
+      if (state === 'active_client' && lead.stage === 'converted' && !lead.contractSignedAt) return true;
       if (state === 'onboarding_pending' && (!lead.credentials?.username || lead.stage !== 'trial-proposed')) return true;
       return false;
     });

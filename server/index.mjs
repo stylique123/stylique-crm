@@ -581,7 +581,7 @@ async function createMicrosoftCalendarEvent(payload) {
   };
 }
 
-async function router(req, res) {
+export async function router(req, res) {
   const corsOrigin = getCorsOrigin(req);
   if (!corsOrigin && req.headers.origin) {
     return send(res, 403, { ok: false, error: 'Origin not allowed' }, { 'Access-Control-Allow-Origin': 'null' });
@@ -730,13 +730,17 @@ async function router(req, res) {
   return send(res, 404, { ok: false, error: 'Not found' }, corsHeaders);
 }
 
-const server = http.createServer((req, res) => {
-  router(req, res).catch(error => {
+export function handleRequest(req, res) {
+  return router(req, res).catch(error => {
     console.error('[stylique-api]', error);
     send(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'Internal server error' });
   });
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`Stylique CRM API listening on :${PORT}`);
-});
+if (process.env.VERCEL !== '1') {
+  const server = http.createServer(handleRequest);
+
+  server.listen(PORT, () => {
+    console.log(`Stylique CRM API listening on :${PORT}`);
+  });
+}

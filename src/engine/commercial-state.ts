@@ -52,7 +52,7 @@ export const COMMERCIAL_LABEL: Record<CommercialState, string> = {
   client_review: 'Client Review',
   onboarding_pending: 'Onboarding Pending',
   pilot: 'Pilot',
-  contract: 'Contract',
+  contract: 'Active Client',
   active_client: 'Active Client',
   payment_due_soon: 'Due Soon',
   overdue: 'Overdue',
@@ -69,7 +69,7 @@ const PAYMENT_DUE_SOON_DAYS = 5;
  * These are mapped here as compatibility-only inputs into the new model:
  *   - trial-proposed / payment-pending → client_review
  *   - trial-active                     → pilot
- *   - converted                        → contract / active client
+ *   - converted                        → active client
  * The legacy trial strings do NOT remain visible in the product copy.
  */
 export function getCommercialState(lead: Lead): CommercialState {
@@ -89,7 +89,7 @@ export function getCommercialState(lead: Lead): CommercialState {
     const days = getPaymentDaysUntilDue(lead);
     if (days !== null && days < 0) return 'overdue';
     if (days !== null && days >= 0 && days <= PAYMENT_DUE_SOON_DAYS) return 'payment_due_soon';
-    return lead.contractSignedAt ? 'contract' : 'active_client';
+    return 'active_client';
   }
 
   if (stage === 'trial-active') {
@@ -128,7 +128,6 @@ export function getCommercialPhase(state: CommercialState): CommercialPhase {
     case 'client_review':
     case 'onboarding_pending':
     case 'pilot':
-    case 'contract':
     case 'active_client':
     case 'payment_due_soon':
     case 'overdue':
@@ -147,12 +146,12 @@ export const isOverduePayment    = (l: Lead) => getCommercialState(l) === 'overd
 export const isOnboardingPending = (l: Lead) => getCommercialState(l) === 'onboarding_pending';
 export const isActiveClient      = (l: Lead) => {
   const s = getCommercialState(l);
-  return s === 'active_client' || s === 'payment_due_soon' || s === 'pilot' || s === 'contract';
+  return s === 'active_client' || s === 'payment_due_soon' || s === 'pilot';
 };
 export const isPaidClient        = (l: Lead) => {
   const s = getCommercialState(l);
   return s === 'active_client' || s === 'payment_due_soon' || s === 'overdue' ||
-         s === 'onboarding_pending' || s === 'pilot' || s === 'contract';
+         s === 'onboarding_pending' || s === 'pilot';
 };
 
 function hasReadyCredentials(lead: Lead): boolean {

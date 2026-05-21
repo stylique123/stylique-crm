@@ -72,7 +72,6 @@ export default function Dashboard() {
     const awaitingReview: Lead[] = [];
     const onboardingQueue: Lead[] = [];
     const pilot: Lead[] = [];
-    const contract: Lead[] = [];
     const activeClients: Lead[] = [];
     const dueSoon: Lead[] = [];
     const overdue: Lead[] = [];
@@ -94,8 +93,7 @@ export default function Dashboard() {
         else awaitingReview.push(lead);
       }
       if (cs === 'pilot') pilot.push(lead);
-      if (cs === 'contract') contract.push(lead);
-      if (cs === 'active_client' || cs === 'pilot' || cs === 'contract') activeClients.push(lead);
+      if (cs === 'active_client' || cs === 'payment_due_soon' || cs === 'overdue') activeClients.push(lead);
       if (cs === 'payment_due_soon') dueSoon.push(lead);
       if (cs === 'overdue') overdue.push(lead);
       if (isThisMonth(lead.lastReplyAt) || (lead.stage === 'sdr-replied' && isThisMonth(lead.updatedAt))) repliesThisMonth++;
@@ -109,7 +107,7 @@ export default function Dashboard() {
       if (lead.stage === 'meeting-booked' && (lead.meetings || []).some(m => m.status !== 'completed' && new Date(m.scheduled_at).getTime() < Date.now())) meetingResultsNeeded++;
     }
 
-    return { awaitingReview, onboardingQueue, pilot, contract, activeClients, dueSoon, overdue, repliesThisMonth, meetingsThisMonth, secondaryContactsMissing, contactedThisMonth, contactedThisWeek, meetingResultsNeeded, decisionPending, newLeads };
+    return { awaitingReview, onboardingQueue, pilot, activeClients, dueSoon, overdue, repliesThisMonth, meetingsThisMonth, secondaryContactsMissing, contactedThisMonth, contactedThisWeek, meetingResultsNeeded, decisionPending, newLeads };
   }, [visibleCompanies]);
 
   const team = useMemo(() => {
@@ -214,23 +212,22 @@ export default function Dashboard() {
         <PulseTile icon={CreditCard} label="Client Review" value={state.awaitingReview.length} sub="Review, payment, credentials" tone="warning" onClick={() => navigate('/clients#review')} />
         <PulseTile icon={Clock} label="Onboarding Queue" value={state.onboardingQueue.length} sub="Ready for Muneeb" tone="neutral" onClick={() => navigate('/clients#queue')} />
         <PulseTile icon={Target} label="Pilot" value={state.pilot.length} sub="Paid pilot running" tone="neutral" onClick={() => navigate('/clients#pilot')} />
-        <PulseTile icon={Users} label="Active clients" value={state.activeClients.length} sub="Pilot + contract" tone="neutral" onClick={() => navigate('/clients#active')} />
+        <PulseTile icon={Users} label="Active clients" value={state.activeClients.length} sub="Recurring clients" tone="neutral" onClick={() => navigate('/clients#active')} />
         <PulseTile icon={AlertTriangle} label="Overdue" value={state.overdue.length} sub={dealTotal(state.overdue)} tone="danger" onClick={() => navigate('/clients#overdue')} />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[1.25fr_.85fr]">
         <CommandSection title="Clients" action="Clients" onAction={() => navigate('/clients')}>
-          <CommandRow title="Client Review" detail="Package, payment, credentials" count={state.awaitingReview.length} tone={state.awaitingReview.length ? 'warning' : 'ok'} />
-          <CommandRow title="Onboarding Queue" detail="Paid with credentials, waiting completion" count={state.onboardingQueue.length} />
+          <CommandRow title="Client Review" detail="CEO action: package, payment, credentials" count={state.awaitingReview.length} tone={state.awaitingReview.length ? 'warning' : 'ok'} />
+          <CommandRow title="Onboarding Queue" detail="Ready for onboarding completion" count={state.onboardingQueue.length} />
           <CommandRow title="Pilot" detail="Paid pilot running" count={state.pilot.length} tone="ok" />
-          <CommandRow title="Contract" detail="Signed recurring clients" count={state.contract.length} tone="ok" />
-          <CommandRow title="Due soon" detail="Renewals approaching" count={state.dueSoon.length} tone={state.dueSoon.length ? 'warning' : 'ok'} />
-          <CommandRow title="Active clients" detail="Total current clients" count={state.activeClients.length} tone="ok" />
+          <CommandRow title="Active clients" detail="Recurring clients" count={state.activeClients.length} tone="ok" />
+          <CommandRow title="Due soon" detail="Renewal within 5 days" count={state.dueSoon.length} tone={state.dueSoon.length ? 'warning' : 'ok'} />
         </CommandSection>
 
         <CommandSection title="Financial" action="Clients" onAction={() => navigate('/clients')}>
           <CommandRow title="Paid this month" detail="Confirmed payments" value={`$${Math.round(paidMonth).toLocaleString()}`} tone="ok" />
-          <CommandRow title="Review value" detail="Open client review value" value={dealTotal(state.awaitingReview)} tone={state.awaitingReview.length ? 'warning' : 'ok'} />
+          <CommandRow title="Pending review value" detail="Potential value in Client Review" value={dealTotal(state.awaitingReview)} tone={state.awaitingReview.length ? 'warning' : 'ok'} />
           <CommandRow title="Overdue amount" detail="Past renewal date" value={dealTotal(state.overdue)} tone={state.overdue.length ? 'danger' : 'ok'} />
         </CommandSection>
       </div>

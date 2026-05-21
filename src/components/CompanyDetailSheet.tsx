@@ -1044,9 +1044,9 @@ function buildUnifiedTimeline(lead: Lead, activities: Activity[]): TimelineItem[
       id: `${lead.id}:contract`,
       at: lead.contractSignedAt,
       kind: 'stage',
-      label: 'Contract',
-      title: 'Contract signed',
-      detail: lead.contractEndDate ? `Contract until ${format(new Date(lead.contractEndDate), 'MMM d, yyyy')}` : undefined,
+      label: 'Active Client',
+      title: 'Active client started',
+      detail: lead.contractEndDate ? `Current term until ${format(new Date(lead.contractEndDate), 'MMM d, yyyy')}` : undefined,
     });
   }
 

@@ -628,9 +628,9 @@ export function processTaskOutcome(
     switch (outcome) {
       case 'interested':
         result = {
-          nextStepDescription: `${lead.companyName} moved to Contract`,
+          nextStepDescription: `${lead.companyName} moved to Active Client`,
           stageChange: 'converted',
-          activityDescription: `Contract signed — ${lead.companyName}`,
+          activityDescription: `Active client started — ${lead.companyName}`,
         };
         break;
       case 'not-now':

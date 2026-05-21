@@ -183,7 +183,7 @@ export const BUCKET_LABELS: Record<LifecycleBucket, string> = {
   trial_ending_soon: 'Pilot ending soon',
   trial_ended_awaiting: 'Pilot decision due',
   payment_window_open: 'Client review',
-  converted: 'Contract',
+  converted: 'Active Client',
   ended_no_response: 'Ended — no response',
   ended_declined: 'Ended — declined',
   closed: 'Closed',

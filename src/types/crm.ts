@@ -550,7 +550,7 @@ export const STAGE_LABELS: Record<string, string> = {
   'trial-proposed': 'Moved to Client Review',
   'trial-active': 'Pilot',
   'payment-pending': 'Client Review',
-  'converted': 'Contract',
+  'converted': 'Active Client',
   'closed-lost': 'Closed Lost',
   'unsubscribed': 'Closed Lost',
   'cold-no-response': 'Cold',
@@ -577,7 +577,7 @@ export const STAGE_GUIDANCE: Record<string, { meaning: string; nextStep: string 
   'trial-proposed': { meaning: 'Leadership review', nextStep: 'Client Review' },
   'trial-active': { meaning: 'Paid pilot', nextStep: 'Pilot decision' },
   'payment-pending': { meaning: 'Client review', nextStep: 'Verify payment and credentials' },
-  'converted': { meaning: 'Contract client', nextStep: 'Renewal continuity' },
+  'converted': { meaning: 'Active client', nextStep: 'Renewal continuity' },
   'closed-lost': { meaning: 'Closed lost', nextStep: 'Keep history' },
   'unsubscribed': { meaning: 'Contact unsubscribed', nextStep: 'Do not contact' },
   'cold-no-response': { meaning: 'Inactive but recoverable', nextStep: 'Cold' },
@@ -604,7 +604,7 @@ export const STAGE_DEFAULT_ACTIONS: Record<string, string> = {
   'trial-proposed': 'Client Review',
   'trial-active': 'Pilot',
   'payment-pending': 'Client Review',
-  'converted': 'Contract',
+  'converted': 'Active Client',
   'closed-lost': 'Add reason',
   'unsubscribed': 'Do not contact',
   'cold-no-response': 'Cold',
@@ -780,7 +780,7 @@ export function recalculateNextAction(lead: Lead): IntelligentAction {
     case 'trial-active': {
       const daysLeft = getPilotDaysLeft(lead);
       if (daysLeft !== null) {
-        if (daysLeft <= 0) return { action: 'Pilot decision due', reason: 'Move to Contract or Lost', urgency: 'today', followUpDate: now.toISOString() };
+        if (daysLeft <= 0) return { action: 'Pilot decision due', reason: 'Move to Active Client or Lost', urgency: 'today', followUpDate: now.toISOString() };
         if (daysLeft <= 5) return { action: `Pilot ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`, reason: 'Decision due soon', urgency: 'today', followUpDate: now.toISOString() };
       }
       return { action: 'Pilot active', reason: 'Paid pilot running', urgency: 'upcoming', followUpDate: addDays(7) };
@@ -793,7 +793,7 @@ export function recalculateNextAction(lead: Lead): IntelligentAction {
     }
 
     case 'converted':
-      return { action: 'Contract client', reason: 'Recurring client', urgency: 'upcoming', followUpDate: addDays(30) };
+      return { action: 'Active client', reason: 'Recurring client', urgency: 'upcoming', followUpDate: addDays(30) };
 
     case 'closed-lost': case 'inbound-disqualified':
       return { action: 'Closed lost', reason: 'Closed', urgency: 'upcoming', followUpDate: addDays(90) };

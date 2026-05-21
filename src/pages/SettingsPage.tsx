@@ -18,7 +18,7 @@ import {
   getConnectorReadiness, getConnectors, saveConnectors, type ConnectorConfig,
 } from '@/lib/connectors';
 import {
-  getApiBaseUrl, getAuthUsers, getBackendHealth, loginToBackend, pingConnector, saveAuthUser,
+  getApiBaseUrl, getAuthUsers, getBackendHealth, loginToBackend, pingConnector, saveAuthUser, saveAuthUsers,
   type AuthUserRecord, type BackendHealth,
 } from '@/lib/backend-api';
 import { useCompanyStore } from '@/lib/company-store';
@@ -147,6 +147,29 @@ export default function SettingsPage() {
 
   const findAuthUser = (id: string) => authUsers.find(user => user.id === id);
 
+  const removeLoginForEmployee = async (id: string) => {
+    const nextUsers = authUsers.filter(user => user.id !== id);
+    setAuthUsers(nextUsers);
+    try {
+      await saveAuthUsers(nextUsers);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Login removal failed');
+    }
+  };
+
+  const countOwnedRecords = (employeeId: string) => companyStore.companies.filter(company =>
+    company.assignedTo === employeeId ||
+    company.assigned_sdr === employeeId ||
+    company.record_owner === employeeId ||
+    company.assigned_onboarding_owner === employeeId
+  ).length;
+
+  const defaultReassignOwner = (employee: EmployeeProfile) =>
+    empStore.employees.find(emp => emp.id === employee.manager && emp.active)?.id ||
+    empStore.employees.find(emp => emp.active && emp.id !== employee.id && emp.role === employee.role)?.id ||
+    empStore.employees.find(emp => emp.active && emp.id !== employee.id && (emp.role === 'ceo' || emp.role === 'coo'))?.id ||
+    '';
+
   const sorted = [...empStore.employees].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
     const order = ['ceo', 'coo', 'operations', 'sdr', 'onboarding'];
@@ -168,19 +191,9 @@ export default function SettingsPage() {
   const toggleActive = (e: EmployeeProfile) => {
     const nextActive = !e.active;
     if (!nextActive) {
-      const ownedCount = companyStore.companies.filter(company =>
-        company.assignedTo === e.id ||
-        company.assigned_sdr === e.id ||
-        company.record_owner === e.id ||
-        company.assigned_onboarding_owner === e.id
-      ).length;
+      const ownedCount = countOwnedRecords(e.id);
       if (ownedCount > 0) {
-        const fallback =
-          empStore.employees.find(emp => emp.id === e.manager && emp.active)?.id ||
-          empStore.employees.find(emp => emp.active && emp.id !== e.id && emp.role === e.role)?.id ||
-          empStore.employees.find(emp => emp.active && emp.id !== e.id && (emp.role === 'ceo' || emp.role === 'coo'))?.id ||
-          '';
-        setReassignTo(fallback);
+        setReassignTo(defaultReassignOwner(e));
         setReassigning(e);
         return;
       }
@@ -195,6 +208,7 @@ export default function SettingsPage() {
         ? `${e.fullName} reactivated`
         : `${e.fullName} deactivated`
     );
+    if (!nextActive) void removeLoginForEmployee(e.id);
   };
 
   const completeReassignment = () => {
@@ -231,6 +245,7 @@ export default function SettingsPage() {
       });
     });
     empStore.saveEmployee({ ...reassigning, active: false, employmentStatus: 'inactive' });
+    void removeLoginForEmployee(reassigning.id);
     toast.success(`${reassigning.fullName} deactivated · ${reassigned} records reassigned`);
     setReassigning(null);
     setReassignTo('');
@@ -252,6 +267,13 @@ export default function SettingsPage() {
     }
     if (isNew && !passwordDraft.trim()) {
       toast.error('Set a login password before adding teammate');
+      return;
+    }
+    const existing = !isNew ? empStore.employees.find(emp => emp.id === next.id) : null;
+    if (existing?.active && next.active === false && countOwnedRecords(next.id) > 0) {
+      setReassignTo(defaultReassignOwner(next));
+      setReassigning(next);
+      setEditing(null);
       return;
     }
     empStore.saveEmployee(next);
@@ -276,6 +298,7 @@ export default function SettingsPage() {
         return;
       }
     }
+    if (!next.active) void removeLoginForEmployee(next.id);
     toast.success(isNew ? `${next.fullName} added with login` : `${next.fullName} updated`);
     setEditing(null);
     setPasswordDraft('');
