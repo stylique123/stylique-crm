@@ -72,10 +72,10 @@ export function AppSidebar() {
       <SidebarContent>
         <div className={`px-4 py-4 ${collapsed ? 'px-2' : ''}`}>
           {collapsed ? (
-            <img src="/stylique-logo.svg" alt="Stylique" className="mx-auto h-7 w-7" />
+            <img src="/stylique-logo.png" alt="Stylique" className="mx-auto h-7 w-7 object-contain" />
           ) : (
             <div className="flex items-center gap-2">
-              <img src="/stylique-logo.svg" alt="Stylique" className="h-8 w-8 shrink-0" />
+              <img src="/stylique-logo.png" alt="Stylique" className="h-8 w-8 shrink-0 object-contain" />
               <span className="text-lg font-semibold tracking-tight text-sidebar-accent-foreground">
                 Stylique <span className="text-primary/70 font-normal text-xs ml-1">CRM</span>
               </span>

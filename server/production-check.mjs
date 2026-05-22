@@ -17,6 +17,7 @@ const microsoftKeys = [
   'MICROSOFT_CLIENT_SECRET',
   'MICROSOFT_CALENDAR_USER_ID',
 ];
+const supabaseKeys = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
 
 const missing = required.filter(key => !process.env[key]);
 const weak = [];
@@ -32,6 +33,10 @@ const partialConnectors = connectorPairs
 const microsoftConfigured = microsoftKeys.filter(key => process.env[key]);
 if (microsoftConfigured.length > 0 && microsoftConfigured.length < microsoftKeys.length) {
   weak.push(`Microsoft Graph config is partial: set all of ${microsoftKeys.join(', ')}`);
+}
+const supabaseConfigured = supabaseKeys.filter(key => process.env[key]);
+if (supabaseConfigured.length > 0 && supabaseConfigured.length < supabaseKeys.length) {
+  weak.push(`Supabase config is partial: set all of ${supabaseKeys.join(', ')}`);
 }
 
 if (missing.length || weak.length || partialConnectors.length) {

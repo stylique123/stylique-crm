@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
-const DATA_DIR = process.env.STYLIQUE_DATA_DIR || path.join(__dirname, 'data');
+const DATA_DIR = process.env.STYLIQUE_DATA_DIR || (process.env.VERCEL === '1' ? path.join('/tmp', 'stylique-crm-data') : path.join(__dirname, 'data'));
 const STATIC_DIR = path.resolve(process.env.STYLIQUE_STATIC_DIR || path.join(__dirname, '..', 'dist'));
 const JWT_SECRET = process.env.STYLIQUE_JWT_SECRET || '';
 const ADMIN_PASSWORD = process.env.STYLIQUE_ADMIN_PASSWORD || '';
@@ -18,6 +18,9 @@ const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
 const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || '';
 const MICROSOFT_CALENDAR_USER_ID = process.env.MICROSOFT_CALENDAR_USER_ID || '';
 const MICROSOFT_DEFAULT_TIMEZONE = process.env.MICROSOFT_DEFAULT_TIMEZONE || 'Asia/Karachi';
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_TABLE = process.env.SUPABASE_TABLE || 'stylique_crm_state';
 const LOGIN_WINDOW_MS = 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const CONNECTOR_WINDOW_MS = 60 * 1000;
@@ -396,7 +399,59 @@ function bucketPath(bucket) {
   return path.join(DATA_DIR, `${bucket}.json`);
 }
 
+function supabaseConfigured() {
+  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseHeaders(extra = {}) {
+  return {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    'Content-Type': 'application/json',
+    ...extra,
+  };
+}
+
+async function readSupabaseBucket(bucket) {
+  if (!STATE_BUCKETS.has(bucket)) return null;
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/${encodeURIComponent(SUPABASE_TABLE)}?bucket=eq.${encodeURIComponent(bucket)}&select=data&limit=1`,
+    { headers: supabaseHeaders() },
+  );
+  if (response.status === 404) {
+    throw new Error(`Supabase table "${SUPABASE_TABLE}" was not found`);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Supabase read failed (${response.status}): ${text || response.statusText}`);
+  }
+  const rows = await response.json().catch(() => []);
+  return rows?.[0]?.data ?? [];
+}
+
+async function writeSupabaseBucket(bucket, data) {
+  if (!STATE_BUCKETS.has(bucket)) return false;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(SUPABASE_TABLE)}`, {
+    method: 'POST',
+    headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates' }),
+    body: JSON.stringify({
+      bucket,
+      data,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  if (response.status === 404) {
+    throw new Error(`Supabase table "${SUPABASE_TABLE}" was not found`);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Supabase write failed (${response.status}): ${text || response.statusText}`);
+  }
+  return true;
+}
+
 async function readBucket(bucket) {
+  if (supabaseConfigured()) return readSupabaseBucket(bucket);
   const file = bucketPath(bucket);
   if (!file) return null;
   try {
@@ -407,6 +462,7 @@ async function readBucket(bucket) {
 }
 
 async function writeBucket(bucket, data) {
+  if (supabaseConfigured()) return writeSupabaseBucket(bucket, data);
   const file = bucketPath(bucket);
   if (!file) return false;
   await mkdir(DATA_DIR, { recursive: true });
@@ -614,6 +670,16 @@ export async function router(req, res) {
         clientId: Boolean(MICROSOFT_CLIENT_ID),
         clientSecret: Boolean(MICROSOFT_CLIENT_SECRET),
         calendarUser: Boolean(MICROSOFT_CALENDAR_USER_ID),
+      },
+      storage: {
+        provider: supabaseConfigured() ? 'supabase' : 'json-file',
+        durable: supabaseConfigured(),
+        supabase: {
+          configured: supabaseConfigured(),
+          url: Boolean(SUPABASE_URL),
+          serviceRoleKey: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+          table: SUPABASE_TABLE,
+        },
       },
     }, corsHeaders);
   }

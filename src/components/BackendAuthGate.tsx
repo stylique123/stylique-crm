@@ -93,7 +93,7 @@ export function BackendAuthGate({ children }: { children: ReactNode }) {
     <AuthShell>
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <img src="/stylique-logo.svg" alt="Stylique" className="h-8 w-8" />
+          <img src="/stylique-logo.png" alt="Stylique" className="h-8 w-8 object-contain" />
           <p className="text-sm font-semibold">Stylique CRM</p>
         </div>
         <p className="text-xs text-muted-foreground">Choose your account and enter your password.</p>
