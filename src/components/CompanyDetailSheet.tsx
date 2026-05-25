@@ -8,6 +8,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
@@ -18,7 +19,8 @@ import {
   PAYMENT_STATUS_LABELS,
   recalculateNextAction,
   getActiveDeal, getProposedDeal, formatMoney, CURRENCY_LABELS, REGION_LABELS,
-  type Currency, type Region, type SubscriptionPlan,
+  type BrandContact, type Currency, type Platform, type Region, type SecondaryContact,
+  type SourceDetail, type SubscriptionPlan,
 } from '@/types/crm';
 import { getLedger, getCurrentBillingEntry } from '@/engine/payment-ledger';
 import { useCompanyStore } from '@/lib/company-store';
@@ -52,7 +54,7 @@ import {
   Calendar, Clock, CreditCard, FlaskConical, ArrowRight, CheckCircle,
   AlertCircle, Shield, Package, ExternalLink, FileText, Key, MessageSquare,
   ChevronRight, DollarSign, EyeOff, Eye, Rocket, X, Copy, Inbox,
-  UserCheck as UserCheckIcon, Info, Target,
+  UserCheck as UserCheckIcon, Info, Target, Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { showActionToast, showErrorToast } from '@/lib/toast-dedup';
@@ -122,6 +124,7 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
   // In-sheet dialog state
   const [trialSetupOpen, setTrialSetupOpen] = useState(false);
   const [credentialsOpen, setCredentialsOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   // Auto-open the correct modal when focusAction is set
   useEffect(() => {
@@ -212,6 +215,11 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
   })();
   const headerBadgeLabel = sdrBucketLabel || BUCKET_LABELS[view.bucket] || view.state.next_action_label || 'Lead';
   const timeline = buildUnifiedTimeline(freshLead, activities);
+  const canEditLeadDetails =
+    isLeadershipViewer ||
+    (viewerRole === 'sdr' &&
+      (freshLead.assignedTo === currentUser || freshLead.assigned_sdr === currentUser) &&
+      !['trial-proposed', 'trial-active', 'payment-pending', 'converted', 'closed-lost'].includes(freshLead.stage));
 
   const handleClose = () => {
     onOpenChange(false);
@@ -373,6 +381,17 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
             </SheetDescription>
             {/* Brand KPI progress — always visible in header */}
             <BrandProgressBadge lead={freshLead} size="md" showAddPrompt className="mt-2" />
+            {canEditLeadDetails && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 h-7 w-fit text-xs"
+                onClick={() => setEditOpen(true)}
+              >
+                <Pencil className="mr-1.5 h-3 w-3" />
+                Edit Lead
+              </Button>
+            )}
           </SheetHeader>
 
           {/* Decision Center — Leadership gets leadership panel, others get execution */}
@@ -732,6 +751,28 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
           existingUsername={freshLead.credentials?.username}
           onSave={handleCredentialsSave}
         />
+
+        <EditLeadDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          lead={freshLead}
+          canAssignOwner={isLeadershipViewer}
+          currentUser={currentUser}
+          onSave={(updatedLead, note) => {
+            const now = new Date().toISOString();
+            const activity: Activity = {
+              id: uid(),
+              leadId: freshLead.id,
+              type: 'note',
+              description: note || 'Lead details updated',
+              createdAt: now,
+              createdBy: currentUser,
+            };
+            commitLeadMutation(bridge, { lead: updatedLead, activity });
+            onLeadUpdate?.(updatedLead);
+            showActionToast(freshLead.id, 'lead-edited', 'Lead details saved');
+          }}
+        />
       </SheetContent>
     </Sheet>
   );
@@ -770,6 +811,282 @@ function ContactRow({ icon: Icon, label, value, href }: { icon: typeof User; lab
         <span className="font-medium truncate">{value}</span>
       )}
     </div>
+  );
+}
+
+function EditLeadDialog({
+  open,
+  onOpenChange,
+  lead,
+  canAssignOwner,
+  currentUser,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  lead: Lead;
+  canAssignOwner: boolean;
+  currentUser: string;
+  onSave: (lead: Lead, note?: string) => void;
+}) {
+  const firstContact = lead.contacts?.[0];
+  const secondContact = lead.contacts?.[1] || lead.secondaryContact;
+  const [companyName, setCompanyName] = useState(lead.companyName || '');
+  const [website, setWebsite] = useState(lead.website || '');
+  const [platform, setPlatform] = useState<Platform>(lead.platform || 'shopify');
+  const [source, setSource] = useState<SourceDetail>(lead.source_detail || 'other');
+  const [owner, setOwner] = useState(lead.assignedTo || currentUser);
+  const [contactName, setContactName] = useState(firstContact?.name || lead.contactName || '');
+  const [contactRole, setContactRole] = useState(firstContact?.role || lead.contactRole || '');
+  const [contactEmail, setContactEmail] = useState(firstContact?.email || lead.contactEmail || '');
+  const [contactPhone, setContactPhone] = useState(firstContact?.phone || lead.contactPhone || '');
+  const [linkedin, setLinkedin] = useState(firstContact?.linkedin || lead.linkedin || '');
+  const [instagram, setInstagram] = useState(firstContact?.instagram || lead.instagram || '');
+  const [secondary, setSecondary] = useState<SecondaryContact>({
+    name: secondContact?.name || '',
+    role: secondContact?.role || '',
+    email: secondContact?.email || '',
+    phone: secondContact?.phone || '',
+    linkedin: secondContact?.linkedin || '',
+    instagram: secondContact?.instagram || '',
+  });
+  const [editNote, setEditNote] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    const primary = lead.contacts?.[0];
+    const secondaryContact = lead.contacts?.[1] || lead.secondaryContact;
+    setCompanyName(lead.companyName || '');
+    setWebsite(lead.website || '');
+    setPlatform(lead.platform || 'shopify');
+    setSource(lead.source_detail || 'other');
+    setOwner(lead.assignedTo || currentUser);
+    setContactName(primary?.name || lead.contactName || '');
+    setContactRole(primary?.role || lead.contactRole || '');
+    setContactEmail(primary?.email || lead.contactEmail || '');
+    setContactPhone(primary?.phone || lead.contactPhone || '');
+    setLinkedin(primary?.linkedin || lead.linkedin || '');
+    setInstagram(primary?.instagram || lead.instagram || '');
+    setSecondary({
+      name: secondaryContact?.name || '',
+      role: secondaryContact?.role || '',
+      email: secondaryContact?.email || '',
+      phone: secondaryContact?.phone || '',
+      linkedin: secondaryContact?.linkedin || '',
+      instagram: secondaryContact?.instagram || '',
+    });
+    setEditNote('');
+  }, [open, lead.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateSecondary = (field: keyof SecondaryContact, value: string) => {
+    setSecondary(prev => ({ ...prev, [field]: value }));
+  };
+
+  const save = () => {
+    if (!companyName.trim() || !contactName.trim()) {
+      showErrorToast(`${lead.id}:edit`, 'Company and primary contact are required');
+      return;
+    }
+    const now = new Date().toISOString();
+    const existingContacts = lead.contacts || [];
+    const primary: BrandContact = {
+      ...(existingContacts[0] || { id: uid(), reached: false }),
+      name: contactName.trim(),
+      role: contactRole.trim() || undefined,
+      email: contactEmail.trim() || undefined,
+      phone: contactPhone.trim() || undefined,
+      linkedin: linkedin.trim() || undefined,
+      instagram: instagram.trim() || undefined,
+    };
+    const secondaryHasData = Boolean(
+      secondary.name?.trim() ||
+      secondary.email?.trim() ||
+      secondary.phone?.trim() ||
+      secondary.linkedin?.trim() ||
+      secondary.instagram?.trim()
+    );
+    const secondaryContact: SecondaryContact | undefined = secondaryHasData
+      ? {
+          name: secondary.name?.trim() || 'Secondary contact',
+          role: secondary.role?.trim() || undefined,
+          email: secondary.email?.trim() || undefined,
+          phone: secondary.phone?.trim() || undefined,
+          linkedin: secondary.linkedin?.trim() || undefined,
+          instagram: secondary.instagram?.trim() || undefined,
+        }
+      : lead.secondaryContact;
+    const secondAsBrandContact: BrandContact | undefined = secondaryContact
+      ? {
+          ...(existingContacts[1] || { id: uid(), reached: false }),
+          name: secondaryContact.name,
+          role: secondaryContact.role,
+          email: secondaryContact.email,
+          phone: secondaryContact.phone,
+          linkedin: secondaryContact.linkedin,
+          instagram: secondaryContact.instagram,
+        }
+      : existingContacts[1];
+    const contacts = [
+      primary,
+      ...(secondAsBrandContact ? [secondAsBrandContact] : []),
+      ...existingContacts.slice(2),
+    ];
+    const changeLines = [
+      lead.companyName !== companyName.trim() ? `Company: ${lead.companyName} -> ${companyName.trim()}` : '',
+      lead.contactName !== contactName.trim() ? `Primary contact: ${lead.contactName} -> ${contactName.trim()}` : '',
+      lead.assignedTo !== owner ? `Owner: ${lead.assignedTo} -> ${owner}` : '',
+      editNote.trim() ? `Note: ${editNote.trim()}` : '',
+    ].filter(Boolean);
+    const nextNotes = editNote.trim()
+      ? [lead.notes, `[Edit ${format(new Date(now), 'MMM d, h:mm a')}] ${editNote.trim()}`].filter(Boolean).join('\n')
+      : lead.notes;
+    const updated: Lead = {
+      ...lead,
+      companyName: companyName.trim(),
+      website: website.trim() || undefined,
+      platform,
+      source_detail: source,
+      assignedTo: owner,
+      assigned_sdr: owner,
+      record_owner: lead.record_owner || owner,
+      contactName: contactName.trim(),
+      contactRole: contactRole.trim() || undefined,
+      contactEmail: contactEmail.trim(),
+      contactPhone: contactPhone.trim() || undefined,
+      linkedin: linkedin.trim() || undefined,
+      instagram: instagram.trim() || undefined,
+      secondaryContact,
+      contacts,
+      notes: nextNotes,
+      leadKey: undefined,
+      updatedAt: now,
+    };
+    onSave(updated, changeLines.length ? `Lead details updated — ${changeLines.join('; ')}` : 'Lead details updated');
+    onOpenChange(false);
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-md overflow-y-auto" side="right">
+        <SheetHeader>
+          <SheetTitle className="text-base">Edit Lead</SheetTitle>
+          <SheetDescription>Update brand and contact details without changing stage history.</SheetDescription>
+        </SheetHeader>
+
+        <div className="mt-5 space-y-4">
+          <Section title="Brand">
+            <Field label="Company name">
+              <Input value={companyName} onChange={e => setCompanyName(e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <Field label="Website">
+              <Input value={website} onChange={e => setWebsite(e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Platform">
+                <select className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs" value={platform} onChange={e => setPlatform(e.target.value as Platform)}>
+                  <option value="shopify">Shopify</option>
+                  <option value="woocommerce">WooCommerce</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </Field>
+              <Field label="Source">
+                <select className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs" value={source} onChange={e => setSource(e.target.value as SourceDetail)}>
+                  <option value="manual_import">Manual import</option>
+                  <option value="linkedin_evaboot">LinkedIn / Evaboot</option>
+                  <option value="website_demo">Website demo</option>
+                  <option value="website_form">Website form</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="google_search">Google search</option>
+                  <option value="referral">Referral</option>
+                  <option value="other">Other</option>
+                </select>
+              </Field>
+            </div>
+            {canAssignOwner && (
+              <Field label="Owner">
+                <select className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs" value={owner} onChange={e => setOwner(e.target.value)}>
+                  {TEAM_MEMBERS.filter(m => m.role === 'sdr' || m.role === 'ceo' || m.role === 'coo').map(member => (
+                    <option key={member.id} value={member.id}>{member.name}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </Section>
+
+          <Section title="Primary Contact">
+            <Field label="Name">
+              <Input value={contactName} onChange={e => setContactName(e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <Field label="Role">
+              <Input value={contactRole} onChange={e => setContactRole(e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <Field label="Email">
+              <Input value={contactEmail} onChange={e => setContactEmail(e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <Field label="Phone">
+              <Input value={contactPhone} onChange={e => setContactPhone(e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="LinkedIn">
+                <Input value={linkedin} onChange={e => setLinkedin(e.target.value)} className="h-8 text-sm" />
+              </Field>
+              <Field label="Instagram">
+                <Input value={instagram} onChange={e => setInstagram(e.target.value)} className="h-8 text-sm" />
+              </Field>
+            </div>
+          </Section>
+
+          <Section title="Secondary Contact">
+            <Field label="Name">
+              <Input value={secondary.name || ''} onChange={e => updateSecondary('name', e.target.value)} className="h-8 text-sm" />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Role">
+                <Input value={secondary.role || ''} onChange={e => updateSecondary('role', e.target.value)} className="h-8 text-sm" />
+              </Field>
+              <Field label="Email">
+                <Input value={secondary.email || ''} onChange={e => updateSecondary('email', e.target.value)} className="h-8 text-sm" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Phone">
+                <Input value={secondary.phone || ''} onChange={e => updateSecondary('phone', e.target.value)} className="h-8 text-sm" />
+              </Field>
+              <Field label="LinkedIn">
+                <Input value={secondary.linkedin || ''} onChange={e => updateSecondary('linkedin', e.target.value)} className="h-8 text-sm" />
+              </Field>
+            </div>
+            {(lead.contacts?.length || 0) > 2 && (
+              <p className="text-[10px] text-muted-foreground">
+                {lead.contacts!.length - 2} additional imported contact(s) will be preserved.
+              </p>
+            )}
+          </Section>
+
+          <Section title="Edit Note">
+            <Textarea value={editNote} onChange={e => setEditNote(e.target.value)} className="min-h-[70px] text-xs" placeholder="Optional context for timeline..." />
+          </Section>
+
+          <div className="flex justify-end gap-2 border-t border-border/40 pt-3">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" className="h-8 text-xs" onClick={save}>
+              Save Lead
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+      {children}
+    </label>
   );
 }
 
