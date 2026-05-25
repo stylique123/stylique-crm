@@ -54,12 +54,34 @@ const CONNECTORS = {
 };
 
 const DEFAULT_AUTH_USERS = {
-  asjad: {
-    password: 'Asjad-CRM-2026!',
-    role: 'sdr',
-    mustChangePassword: false,
-  },
+  asjad: { password: 'Asjad-CRM-2026!', role: 'sdr', mustChangePassword: false },
+  areeba: { password: 'Areeba-eMGrpg-2026', role: 'sdr', mustChangePassword: false },
+  khadija: { password: 'Khadija-SDT-2026', role: 'sdr', mustChangePassword: false },
+  taiba: { password: 'Taiba-IGI2FQ-2026', role: 'sdr', mustChangePassword: false },
 };
+
+function sdrForTerritory(territory = '') {
+  const t = String(territory || '').trim().toLowerCase();
+  if (/pakistan|\bpk\b/.test(t)) return 'khadija';
+  if (/united kingdom|\buk\b|england|scotland|wales|britain/.test(t)) return 'taiba';
+  if (/canada|\bca\b/.test(t)) return 'areeba';
+  if (/united states|\bus\b|\busa\b|america/.test(t)) return 'asjad';
+  return 'asjad';
+}
+
+function detectCountry(row = {}) {
+  const explicit = String(row.country || row.territory || '').trim();
+  if (explicit) return explicit;
+  const phone = String(row.phone || row.contactPhone || '').replace(/[^0-9+]/g, '');
+  if (/^\+?44/.test(phone)) return 'United Kingdom';
+  if (/^\+?92/.test(phone)) return 'Pakistan';
+  if (/^\+?1/.test(phone)) return 'United States';
+  const hint = String(row.website || row.domain || row.contactEmail || row.email || '').toLowerCase();
+  if (/\.co\.uk|\.uk(\b|$|\/)/.test(hint)) return 'United Kingdom';
+  if (/\.pk(\b|$|\/)/.test(hint)) return 'Pakistan';
+  if (/\.ca(\b|$|\/)/.test(hint)) return 'Canada';
+  return 'United States';
+}
 
 let graphTokenCache = { token: '', expiresAt: 0 };
 
@@ -393,6 +415,512 @@ async function ingestBookDemo(body, user) {
   await writeBucket('leads', leads);
   await writeBucket('activities', activities.slice(0, 500));
   return { status: 201, body: { ok: true, leadId: lead.id, merged: false } };
+}
+
+async function ingestOutboundLead(body, user) {
+  const companyName = String(body.companyName || body.company || body.brand || '').trim();
+  if (!companyName) return { status: 400, body: { ok: false, error: 'companyName/brand required' } };
+
+  const now = new Date().toISOString();
+  const territory = String(body.territory || body.country || '').trim();
+  const owner = String(body.owner || body.assigned_sdr || '').trim() || sdrForTerritory(territory);
+  const segment = String(body.segment || 'S3').trim().toUpperCase();
+  const intentScore = Number(body.intentScore ?? body.intent_score ?? 0) || 0;
+  const website = String(body.website || body.domain || '').trim() || undefined;
+  const incoming = Array.isArray(body.contacts) && body.contacts.length
+    ? body.contacts
+    : [{
+        name: String(body.contactName || body.name || '').trim(),
+        email: String(body.contactEmail || body.email || '').trim() || undefined,
+        title: String(body.title || '').trim() || undefined,
+        linkedin: String(body.linkedin || '').trim() || undefined,
+      }];
+  const contacts = incoming
+    .filter(contact => contact && (contact.name || contact.email || contact.linkedin))
+    .map(contact => ({
+      id: safeId('contact'),
+      name: String(contact.name || '').trim(),
+      email: String(contact.email || '').trim() || undefined,
+      title: String(contact.title || contact.role || '').trim() || undefined,
+      linkedin: String(contact.linkedin || '').trim() || undefined,
+      reached: false,
+    }));
+
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  const existing = leads.find(lead => normalizeBrandName(lead.companyName) === normalizeBrandName(companyName));
+
+  if (existing) {
+    const mergedContacts = Array.isArray(existing.contacts) ? [...existing.contacts] : [];
+    for (const contact of contacts) {
+      if (!contactAlreadyExists(mergedContacts, contact.email, contact.name)) mergedContacts.push(contact);
+    }
+    Object.assign(existing, {
+      contacts: mergedContacts,
+      website: existing.website || website,
+      segment: existing.segment || segment,
+      intent_score: Math.max(Number(existing.intent_score || 0), intentScore),
+      entry_flow: existing.entry_flow || 'outbound',
+      source_detail: existing.source_detail || 'gtm_pipeline',
+      updatedAt: now,
+    });
+    activities.unshift({
+      id: safeId('activity'),
+      leadId: existing.id,
+      type: 'stage-change',
+      description: `Outbound contact merged into ${companyName} (intent ${intentScore}, ${segment})`,
+      createdAt: now,
+      createdBy: user?.sub || 'gtm-pipeline',
+    });
+    await writeBucket('leads', leads);
+    await writeBucket('activities', activities.slice(0, 500));
+    return { status: 200, body: { ok: true, leadId: existing.id, merged: true } };
+  }
+
+  const lead = {
+    id: safeId('lead'),
+    companyName,
+    contactName: contacts[0]?.name || '',
+    contactEmail: contacts[0]?.email,
+    website,
+    contacts,
+    contactsReachedCount: 0,
+    pipeline: 'outbound-sdr',
+    stage: 'sdr-new-lead',
+    assignedTo: owner,
+    platform: String(body.platform || 'shopify'),
+    territory,
+    segment,
+    intent_score: intentScore,
+    entry_flow: 'outbound',
+    source_detail: 'gtm_pipeline',
+    action_owner: 'sdr',
+    record_owner: owner,
+    assigned_sdr: owner,
+    notes: String(body.note || '').trim() || undefined,
+    createdAt: now,
+    updatedAt: now,
+    priority: intentScore >= 4 ? 'high' : intentScore === 3 ? 'medium' : 'low',
+    leadKey: normalizeBrandName(companyName),
+  };
+  leads.push(lead);
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: 'stage-change',
+    description: `Outbound lead created — ${companyName} (intent ${intentScore}, ${segment}, SDR ${owner})`,
+    createdAt: now,
+    createdBy: user?.sub || 'gtm-pipeline',
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: 201, body: { ok: true, leadId: lead.id, merged: false } };
+}
+
+async function ingestReply(body, user) {
+  const channel = String(body.channel || 'email').trim().toLowerCase();
+  const email = String(body.email || '').trim().toLowerCase();
+  const linkedin = String(body.linkedin || '').trim().toLowerCase();
+  const companyName = String(body.companyName || body.company || body.brand || '').trim();
+  const message = String(body.message || body.text || '').trim();
+  if (!email && !linkedin && !companyName) {
+    return { status: 400, body: { ok: false, error: 'email, linkedin or companyName required' } };
+  }
+
+  const now = new Date().toISOString();
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  const lead = leads.find(item =>
+    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
+    (email && (String(item.contactEmail || '').toLowerCase() === email ||
+      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email)))) ||
+    (linkedin && Array.isArray(item.contacts) &&
+      item.contacts.some(contact => String(contact.linkedin || '').toLowerCase() === linkedin))
+  );
+  if (!lead) return { status: 404, body: { ok: false, error: 'No matching lead found for reply' } };
+
+  const owner = lead.assigned_sdr || lead.assignedTo || 'abdullah';
+  Object.assign(lead, {
+    replied: true,
+    stop_sequences: true,
+    last_reply_channel: channel,
+    last_reply_at: now,
+    stage: /^won|converted|trial-active|payment-pending/.test(String(lead.stage || '')) ? lead.stage : 'sdr-replied',
+    updatedAt: now,
+    tasks: [...(Array.isArray(lead.tasks) ? lead.tasks : []), {
+      id: safeId('task'),
+      title: `Reply received via ${channel}`,
+      dueDate: now,
+      completed: false,
+      assignedTo: owner,
+      type: 'reply',
+      autoGenerated: true,
+      createdAt: now,
+      priority: 'high',
+      reason: message ? `Reply: ${message.slice(0, 160)}` : `Inbound reply on ${channel}`,
+      stageFamily: 'sdr',
+    }],
+  });
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: 'note',
+    channel,
+    description: message ? `Reply (${channel}): ${message.slice(0, 240)}` : `Reply received via ${channel}`,
+    createdAt: now,
+    createdBy: user?.sub || 'inbound-agent',
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: 200, body: { ok: true, leadId: lead.id, stop_sequences: true, owner } };
+}
+
+async function ingestAdvance(body, user) {
+  const leadId = String(body.leadId || body.id || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const companyName = String(body.companyName || body.company || body.brand || '').trim();
+  if (!leadId && !email && !companyName) {
+    return { status: 400, body: { ok: false, error: 'leadId, email or companyName required' } };
+  }
+
+  const now = new Date().toISOString();
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  const lead = leads.find(item =>
+    (leadId && item.id === leadId) ||
+    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
+    (email && (String(item.contactEmail || '').toLowerCase() === email ||
+      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email))))
+  );
+  if (!lead) return { status: 404, body: { ok: false, error: 'No matching lead found' } };
+
+  const action = String(body.action || 'email').trim().toLowerCase();
+  const outboundActions = new Set(['email', 'linkedin', 'whatsapp', 'cold-email', 'sequence']);
+  if (lead.stop_sequences && outboundActions.has(action)) {
+    return { status: 409, body: { ok: false, error: 'Lead has replied — outbound sequences stopped', leadId: lead.id } };
+  }
+
+  const subject = String(body.emailSubject || body.subject || '').trim();
+  const emailBody = String(body.emailBody || body.message || '').trim();
+  const nextStage = String(body.stage || '').trim();
+  const note = String(body.note || '').trim();
+  const channel = String(body.channel || 'email').trim().toLowerCase();
+  if (nextStage) lead.stage = nextStage;
+  if (body.priority) lead.priority = String(body.priority);
+  if (body.mark) lead[String(body.mark)] = true;
+  if (body.fields && typeof body.fields === 'object') Object.assign(lead, body.fields);
+  if (body.owner) {
+    lead.assigned_sdr = String(body.owner);
+    lead.assignedTo = String(body.owner);
+  }
+  lead.updatedAt = now;
+  lead.last_action = action;
+  lead.last_action_at = now;
+  if (note) lead.notes = [lead.notes, `[${action}] ${note}`].filter(Boolean).join('\n');
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: action === 'email' ? 'email' : 'stage-change',
+    channel,
+    description: subject ? `Sent ${channel}: ${subject}` : (note || `Action: ${action} via ${channel}`),
+    body: emailBody ? emailBody.slice(0, 2000) : undefined,
+    createdAt: now,
+    createdBy: user?.sub || 'claude-agent',
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: 200, body: { ok: true, leadId: lead.id, stage: lead.stage } };
+}
+
+async function ingestInboundList(body, user) {
+  const rows = Array.isArray(body.leads) ? body.leads : (Array.isArray(body) ? body : []);
+  if (!rows.length) return { status: 400, body: { ok: false, error: 'leads array required' } };
+
+  const now = new Date().toISOString();
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  let created = 0;
+  let merged = 0;
+
+  for (const row of rows) {
+    const companyName = String(row.companyName || row.company || row.brand || '').trim();
+    const contactName = String(row.contactName || row.name || '').trim();
+    const contactEmail = String(row.contactEmail || row.email || '').trim();
+    if (!companyName && !contactEmail) continue;
+    const country = detectCountry(row);
+    const owner = sdrForTerritory(country);
+    const phone = String(row.contactPhone || row.phone || '').trim() || undefined;
+    const existing = companyName
+      ? leads.find(lead => normalizeBrandName(lead.companyName) === normalizeBrandName(companyName))
+      : null;
+    if (existing) {
+      const contacts = Array.isArray(existing.contacts) ? existing.contacts : [];
+      if (!contactAlreadyExists(contacts, contactEmail, contactName)) {
+        contacts.push({ id: safeId('contact'), name: contactName, email: contactEmail || undefined, phone, reached: false });
+        existing.contacts = contacts;
+      }
+      existing.updatedAt = now;
+      merged++;
+      continue;
+    }
+    const lead = {
+      id: safeId('lead'),
+      companyName: companyName || contactName,
+      contactName,
+      contactEmail: contactEmail || undefined,
+      contactPhone: phone,
+      website: String(row.website || row.domain || '').trim() || undefined,
+      contacts: [{ id: safeId('contact'), name: contactName, email: contactEmail || undefined, phone, reached: false }],
+      contactsReachedCount: 0,
+      pipeline: 'inbound',
+      stage: 'inbound-new',
+      assignedTo: owner,
+      assigned_sdr: owner,
+      record_owner: owner,
+      action_owner: 'sdr',
+      territory: country,
+      entry_flow: 'inbound',
+      inbound_type: 'csv_import',
+      source_detail: 'inbound_csv',
+      platform: String(row.platform || 'shopify'),
+      notes: String(row.note || '').trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+      priority: 'medium',
+      leadKey: normalizeBrandName(companyName || contactEmail),
+      tasks: [{
+        id: safeId('task'),
+        title: `Reach out to book a meeting (${country})`,
+        dueDate: now,
+        completed: false,
+        assignedTo: owner,
+        type: 'outreach',
+        autoGenerated: true,
+        createdAt: now,
+        priority: 'medium',
+        reason: 'Inbound CSV import',
+        stageFamily: 'sdr',
+      }],
+    };
+    leads.push(lead);
+    created++;
+    activities.unshift({
+      id: safeId('activity'),
+      leadId: lead.id,
+      type: 'stage-change',
+      description: `Inbound CSV lead created — ${lead.companyName} (${country}, SDR ${owner})`,
+      createdAt: now,
+      createdBy: user?.sub || 'inbound-csv',
+    });
+  }
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: 200, body: { ok: true, created, merged } };
+}
+
+async function ingestBooking(body, user) {
+  const email = String(body.email || body.inviteeEmail || '').trim().toLowerCase();
+  const companyName = String(body.companyName || body.company || '').trim();
+  const when = String(body.startTime || body.scheduled_at || body.eventStartTime || '').trim();
+  if (!email && !companyName) return { status: 400, body: { ok: false, error: 'email or companyName required' } };
+
+  const now = new Date().toISOString();
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  let lead = leads.find(item =>
+    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
+    (email && (String(item.contactEmail || '').toLowerCase() === email ||
+      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email))))
+  );
+  let createdNew = false;
+  if (!lead) {
+    lead = {
+      id: safeId('lead'),
+      companyName: companyName || email,
+      contactEmail: email || undefined,
+      contacts: email ? [{ id: safeId('contact'), email, reached: true }] : [],
+      pipeline: 'inbound',
+      stage: 'inbound-new',
+      entry_flow: 'inbound',
+      source_detail: 'calendly_direct',
+      assigned_sdr: 'abdullah',
+      assignedTo: 'abdullah',
+      record_owner: 'abdullah',
+      action_owner: 'sdr',
+      createdAt: now,
+      updatedAt: now,
+      leadKey: normalizeBrandName(companyName || email),
+    };
+    leads.push(lead);
+    createdNew = true;
+  }
+  const owner = lead.assigned_sdr || lead.assignedTo || 'abdullah';
+  Object.assign(lead, {
+    stage: 'meeting-booked',
+    stop_sequences: true,
+    meeting_at: when || lead.meeting_at,
+    updatedAt: now,
+    tasks: [...(Array.isArray(lead.tasks) ? lead.tasks : []), {
+      id: safeId('task'),
+      title: `Attend booked meeting${when ? ' on ' + when : ''}`,
+      dueDate: when || now,
+      completed: false,
+      assignedTo: owner,
+      type: 'meeting',
+      autoGenerated: true,
+      createdAt: now,
+      priority: 'high',
+      stageFamily: 'sdr',
+    }],
+  });
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: 'meeting',
+    description: `Meeting booked${when ? ' for ' + when : ''}${createdNew ? ' (new direct booking)' : ''}`,
+    createdAt: now,
+    createdBy: user?.sub || 'calendly',
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: createdNew ? 201 : 200, body: { ok: true, leadId: lead.id, stage: 'meeting-booked' } };
+}
+
+async function ingestInboundEvent(body, user) {
+  const channel = String(body.channel || 'email').trim().toLowerCase();
+  const source = String(body.source || channel).trim().toLowerCase();
+  const email = String(body.email || '').trim().toLowerCase();
+  const linkedin = String(body.linkedin || '').trim().toLowerCase();
+  const companyName = String(body.companyName || body.company || body.brand || '').trim();
+  const name = String(body.name || body.contactName || '').trim();
+  const message = String(body.message || body.text || '').trim();
+  if (!email && !linkedin && !companyName) {
+    return { status: 400, body: { ok: false, error: 'email, linkedin or companyName required' } };
+  }
+
+  const now = new Date().toISOString();
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  let lead = leads.find(item =>
+    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
+    (email && (String(item.contactEmail || '').toLowerCase() === email ||
+      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email)))) ||
+    (linkedin && Array.isArray(item.contacts) &&
+      item.contacts.some(contact => String(contact.linkedin || '').toLowerCase() === linkedin))
+  );
+  let isNew = false;
+  if (!lead) {
+    const country = detectCountry(body);
+    const owner = sdrForTerritory(country);
+    lead = {
+      id: safeId('lead'),
+      companyName: companyName || name || email,
+      contactName: name,
+      contactEmail: email || undefined,
+      contacts: (email || name || linkedin) ? [{ id: safeId('contact'), name, email: email || undefined, linkedin: linkedin || undefined, reached: true }] : [],
+      pipeline: 'inbound',
+      stage: 'inbound-new',
+      assignedTo: owner,
+      assigned_sdr: owner,
+      record_owner: owner,
+      action_owner: 'sdr',
+      territory: country,
+      entry_flow: 'inbound',
+      inbound_type: source,
+      source_detail: source,
+      createdAt: now,
+      updatedAt: now,
+      priority: 'medium',
+      leadKey: normalizeBrandName(companyName || email || name),
+      tasks: [],
+    };
+    leads.push(lead);
+    isNew = true;
+  }
+  const owner = lead.assigned_sdr || lead.assignedTo || 'abdullah';
+  const keepStage = /^won|^meeting|converted|trial-active|payment-pending/.test(String(lead.stage || ''));
+  Object.assign(lead, {
+    replied: true,
+    stop_sequences: true,
+    last_reply_channel: channel,
+    last_reply_at: now,
+    stage: keepStage ? lead.stage : (lead.pipeline === 'inbound' ? 'inbound-qualified' : 'sdr-replied'),
+    updatedAt: now,
+    tasks: [...(Array.isArray(lead.tasks) ? lead.tasks : []), {
+      id: safeId('task'),
+      title: `Inbound ${source} received`,
+      dueDate: now,
+      completed: false,
+      assignedTo: owner,
+      type: 'reply',
+      autoGenerated: true,
+      createdAt: now,
+      priority: 'high',
+      reason: message ? message.slice(0, 160) : `Inbound ${source}`,
+      stageFamily: 'sdr',
+    }],
+  });
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: 'note',
+    channel,
+    description: message ? `Inbound ${source} (${channel}): ${message.slice(0, 240)}` : `Inbound ${source} via ${channel}`,
+    createdAt: now,
+    createdBy: user?.sub || 'inbound-agent',
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: isNew ? 201 : 200, body: { ok: true, leadId: lead.id, isNew, owner, stop_sequences: true } };
+}
+
+async function ingestMeetingRecap(body, user) {
+  const email = String(body.email || '').trim().toLowerCase();
+  const companyName = String(body.companyName || body.company || '').trim();
+  if (!email && !companyName) return { status: 400, body: { ok: false, error: 'email or companyName required' } };
+
+  const now = new Date().toISOString();
+  const leads = await readBucket('leads');
+  const activities = await readBucket('activities');
+  const lead = leads.find(item =>
+    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
+    (email && (String(item.contactEmail || '').toLowerCase() === email ||
+      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email))))
+  );
+  if (!lead) return { status: 404, body: { ok: false, error: 'No matching lead found' } };
+
+  const owner = lead.assigned_sdr || lead.assignedTo || 'abdullah';
+  const highlights = String(body.highlights || body.notes || '').slice(0, 4000);
+  Object.assign(lead, {
+    stage: 'meeting-completed',
+    meeting_highlights: highlights || lead.meeting_highlights,
+    meeting_needs: String(body.needs || '').slice(0, 2000) || lead.meeting_needs,
+    recommended_package: body.recommended_package || lead.recommended_package,
+    updatedAt: now,
+    tasks: [...(Array.isArray(lead.tasks) ? lead.tasks : []), {
+      id: safeId('task'),
+      title: 'Send tailored proposal within 24h',
+      dueDate: now,
+      completed: false,
+      assignedTo: owner,
+      type: 'proposal',
+      autoGenerated: true,
+      createdAt: now,
+      priority: 'high',
+      stageFamily: 'sdr',
+    }],
+  });
+  activities.unshift({
+    id: safeId('activity'),
+    leadId: lead.id,
+    type: 'meeting',
+    description: highlights ? highlights.slice(0, 300) : 'Meeting completed',
+    createdAt: now,
+    createdBy: user?.sub || 'meeting-recap',
+  });
+  await writeBucket('leads', leads);
+  await writeBucket('activities', activities.slice(0, 500));
+  return { status: 200, body: { ok: true, leadId: lead.id, stage: 'meeting-completed' } };
 }
 
 function base64Url(input) {
@@ -830,6 +1358,55 @@ export async function router(req, res) {
       return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
     }
     const result = await ingestBookDemo(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/outbound-lead' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestOutboundLead(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/reply' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestReply(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/advance' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestAdvance(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/inbound-csv' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestInboundList(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/booking' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestBooking(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/inbound-event' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestInboundEvent(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/meeting-recap' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestMeetingRecap(await readBody(req), user);
     return send(res, result.status, result.body, corsHeaders);
   }
 
