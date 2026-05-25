@@ -48,6 +48,9 @@ const LEAD_FIELDS = [
   { key: 'owner', label: 'Owner', required: false },
   { key: 'stage', label: 'Stage', required: false },
   { key: 'tags', label: 'Tags', required: false },
+  { key: 'createdAt', label: 'Created Date', required: false },
+  { key: 'updatedAt', label: 'Updated Date', required: false },
+  { key: 'lastModifiedAt', label: 'Last Modified', required: false },
 ] as const;
 
 type LeadFieldKey = typeof LEAD_FIELDS[number]['key'];
@@ -59,6 +62,11 @@ interface ParsedRow {
   duplicateId?: string;
   selected: boolean;
   action: 'import' | 'merge' | 'skip';
+}
+
+interface ImportFileMeta {
+  name: string;
+  lastModifiedAt?: string;
 }
 
 interface CSVImportDialogProps {
@@ -209,6 +217,9 @@ export function autoMapHeaders(csvHeaders: string[]): Record<string, LeadFieldKe
     owner: ['owner', 'assigned to', 'rep', 'sdr'],
     stage: ['stage', 'status', 'pipeline stage'],
     tags: ['tags', 'labels', 'categories'],
+    createdAt: ['created at', 'created date', 'date created', 'date added', 'lead created', 'crm created'],
+    updatedAt: ['updated at', 'updated date', 'last updated', 'modified at', 'modified date'],
+    lastModifiedAt: ['last modified', 'last modification', 'file modified', 'source modified'],
   };
   
   for (const csvH of csvHeaders) {
@@ -281,6 +292,26 @@ function fallbackContactName(mapped: Partial<Record<LeadFieldKey, string>>): str
   return 'Primary contact';
 }
 
+function parseDateLike(value?: string): string | undefined {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber) && asNumber > 20000 && asNumber < 80000) {
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    return new Date(excelEpoch + asNumber * 86400000).toISOString();
+  }
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
+}
+
+function newestIso(...values: Array<string | undefined>): string {
+  const newest = values
+    .map(value => value ? new Date(value).getTime() : NaN)
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  return newest ? new Date(newest).toISOString() : new Date().toISOString();
+}
+
 export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDialogProps) {
   const { companies, saveCompany, addActivity, refresh } = useCompanyStore();
   const { currentUser, isLeadership } = useUser();
@@ -295,6 +326,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   const [sourceTag, setSourceTag] = useState<SourceDetail>('manual_import');
   const [defaultOwner, setDefaultOwner] = useState(currentUser);
   const [defaultPlatform, setDefaultPlatform] = useState<Platform>('shopify');
+  const [importFileMeta, setImportFileMeta] = useState<ImportFileMeta | null>(null);
 
   const [demoWebhookUrl, setDemoWebhookUrl] = useState('');
   const [demoCompany, setDemoCompany] = useState('');
@@ -312,27 +344,32 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
     setCsvHeaders([]);
     setFieldMapping({});
     setParsedRows([]);
+    setImportFileMeta(null);
     setImportResults({ imported: 0, merged: 0, skipped: 0, errors: 0 });
   };
 
   const buildParsedRows = useCallback((rows: Record<string, string>[], mapping: Record<string, LeadFieldKey | ''>) => {
+    const seenInFile = new Set<string>();
     return rows.map(raw => {
       const row: Partial<Record<LeadFieldKey, string>> = {};
       for (const [csvH, leadField] of Object.entries(mapping)) {
         if (leadField && raw[csvH]) row[leadField] = raw[csvH];
       }
 
+      const brandKey = normalizeBrandName(row.companyName);
       const existingByName = companies.find(c =>
-        normalizeBrandName(c.companyName) === normalizeBrandName(row.companyName)
+        normalizeBrandName(c.companyName) === brandKey
       );
+      const duplicateInFile = Boolean(brandKey && seenInFile.has(brandKey));
+      if (brandKey) seenInFile.add(brandKey);
 
       return {
         raw,
         mapped: row,
-        isDuplicate: !!existingByName,
+        isDuplicate: !!existingByName || duplicateInFile,
         duplicateId: existingByName?.id,
         selected: true,
-        action: existingByName ? 'merge' as const : 'import' as const,
+        action: existingByName || duplicateInFile ? 'merge' as const : 'import' as const,
       };
     });
   }, [companies]);
@@ -354,6 +391,10 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       }
 
       setCsvHeaders(headers);
+      setImportFileMeta({
+        name: file.name,
+        lastModifiedAt: file.lastModified ? new Date(file.lastModified).toISOString() : undefined,
+      });
       const autoMap = autoMapHeaders(headers);
       setFieldMapping(autoMap);
       setParsedRows(buildParsedRows(rows, autoMap));
@@ -372,6 +413,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
 
   const applyMapping = () => {
     // Re-map rows with updated field mapping
+    const seenInFile = new Set<string>();
     const updated = parsedRows.map(row => {
       const mapped: Partial<Record<LeadFieldKey, string>> = {};
       for (const [csvH, leadField] of Object.entries(fieldMapping)) {
@@ -380,16 +422,19 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         }
       }
 
+      const brandKey = normalizeBrandName(mapped.companyName);
       const existingByName = companies.find(c =>
-        normalizeBrandName(c.companyName) === normalizeBrandName(mapped.companyName)
+        normalizeBrandName(c.companyName) === brandKey
       );
-      const duplicate = existingByName;
+      const duplicateInFile = Boolean(brandKey && seenInFile.has(brandKey));
+      if (brandKey) seenInFile.add(brandKey);
+      const duplicate = existingByName || duplicateInFile;
 
       return {
         ...row,
         mapped,
         isDuplicate: !!duplicate,
-        duplicateId: duplicate?.id,
+        duplicateId: existingByName?.id,
         action: duplicate ? (row.action === 'skip' ? 'merge' : row.action) : 'import' as const,
       };
     });
@@ -408,6 +453,11 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
   const executeImport = () => {
     const now = new Date().toISOString();
     let imported = 0, merged = 0, skipped = 0, errors = 0;
+    const processedBrands = new Map(
+      companies
+        .filter(company => company.companyName)
+        .map(company => [normalizeBrandName(company.companyName), company] as const)
+    );
 
     for (const row of parsedRows) {
       if (!row.selected || row.action === 'skip') { skipped++; continue; }
@@ -415,10 +465,17 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       const m = row.mapped;
       if (!m.companyName) { errors++; continue; }
       const contactName = fallbackContactName(m);
+      const brandKey = normalizeBrandName(m.companyName);
+      const sourceCreatedAt = parseDateLike(m.createdAt);
+      const sourceUpdatedAt = parseDateLike(m.updatedAt);
+      const sourceLastModifiedAt = parseDateLike(m.lastModifiedAt) || importFileMeta?.lastModifiedAt;
+      const recordCreatedAt = sourceCreatedAt || sourceUpdatedAt || sourceLastModifiedAt || now;
+      const recordUpdatedAt = newestIso(sourceUpdatedAt, sourceLastModifiedAt, now);
+      const existingFromFileOrCrm = brandKey ? processedBrands.get(brandKey) : undefined;
 
-      if (row.action === 'merge' && row.duplicateId) {
+      if ((row.action === 'merge' && row.duplicateId) || existingFromFileOrCrm) {
         // Merge into existing brand record. Brands are canonical; people are contacts.
-        const existing = companies.find(c => c.id === row.duplicateId);
+        const existing = existingFromFileOrCrm || companies.find(c => c.id === row.duplicateId);
         if (!existing) { errors++; continue; }
         const baseContacts: BrandContact[] = existing.contacts?.length ? existing.contacts : [{
           id: uid(),
@@ -458,18 +515,26 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
           instagram: m.instagram || existing.instagram,
           linkedin: m.linkedin || existing.linkedin,
           source_detail: normalizeSource(m.source, existing.source_detail || sourceTag),
+          importedAt: now,
+          importedBy: currentUser,
+          importFileName: importFileMeta?.name || existing.importFileName,
+          sourceCreatedAt: sourceCreatedAt || existing.sourceCreatedAt,
+          sourceUpdatedAt: sourceUpdatedAt || existing.sourceUpdatedAt,
+          sourceLastModifiedAt: sourceLastModifiedAt || existing.sourceLastModifiedAt,
           notes: [
             existing.notes,
-            m.notes ? `[Import] ${m.notes}` : '',
+            m.notes ? `[Import ${now.slice(0, 10)}] ${m.notes}` : '',
             `Imported contact: ${contactName}${m.contactEmail ? ` · ${m.contactEmail}` : ''}`,
           ].filter(Boolean).join('\n'),
-          updatedAt: now,
+          updatedAt: newestIso(existing.updatedAt, recordUpdatedAt),
         };
         saveCompany(updated);
+        if (brandKey) processedBrands.set(brandKey, updated);
         addActivity({
           id: uid(), leadId: existing.id, type: 'stage-change',
-          description: `CSV import merged contact into brand`,
+          description: `Import merged contact into brand`,
           createdAt: now, createdBy: currentUser,
+          metadata: { previousStage: existing.stage, newStage: existing.stage },
         });
         merged++;
         continue;
@@ -517,8 +582,14 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
           m.tags ? `Tags: ${m.tags}` : '',
           'Secondary contact missing',
         ].filter(Boolean).join('\n'),
-        createdAt: now,
-        updatedAt: now,
+        createdAt: recordCreatedAt,
+        updatedAt: recordUpdatedAt,
+        importedAt: now,
+        importedBy: currentUser,
+        importFileName: importFileMeta?.name,
+        sourceCreatedAt,
+        sourceUpdatedAt,
+        sourceLastModifiedAt,
         tasks: [{
           id: uid(),
           title: 'Secondary contact missing',
@@ -536,6 +607,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
       };
 
       lead.leadKey = generateLeadKey(lead);
+      if (brandKey) processedBrands.set(brandKey, lead);
       const intel = recalculateNextAction(lead);
       lead.nextAction = intel.action;
       lead.nextActionReason = intel.reason;
@@ -547,6 +619,7 @@ export function CSVImportDialog({ open, onOpenChange, defaultFlow }: CSVImportDi
         id: uid(), leadId: lead.id, type: 'stage-change',
         description: `Brand imported via CSV — ${lead.companyName}`,
         createdAt: now, createdBy: currentUser,
+        metadata: { newStage: lead.stage },
       });
       imported++;
     }

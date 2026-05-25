@@ -107,13 +107,15 @@ describe('Stylique product audit invariants', () => {
   });
 
   it('imports brand-first CSV with only brand/contact columns mapped automatically', () => {
-    const csv = 'Brand Name,Person,Sales Navigator URL\nRadiance Co,Aisha,https://linkedin.com/company/radiance\nSolo Brand,,https://example.com\n';
+    const csv = 'Brand Name,Person,Sales Navigator URL,Created Date,Last Modified\nRadiance Co,Aisha,https://linkedin.com/company/radiance,2026-05-01,2026-05-20\nSolo Brand,,https://example.com,2026-05-02,2026-05-21\n';
     const parsed = parseCSV(csv);
     expect(parsed.rows).toHaveLength(2);
     const mapping = autoMapHeaders(parsed.headers);
     expect(mapping['Brand Name']).toBe('companyName');
     expect(mapping.Person).toBe('contactName');
     expect(mapping['Sales Navigator URL']).toBe('linkedin');
+    expect(mapping['Created Date']).toBe('createdAt');
+    expect(mapping['Last Modified']).toBe('lastModifiedAt');
   });
 
   it('imports Excel sheets instead of reading XLSX bytes as CSV text', () => {

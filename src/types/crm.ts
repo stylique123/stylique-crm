@@ -259,6 +259,13 @@ export interface Lead {
   notes: string;
   createdAt: string;
   updatedAt: string;
+  /** Import audit trail — preserves when a record entered CRM and where it came from. */
+  importedAt?: string;
+  importedBy?: string;
+  importFileName?: string;
+  sourceCreatedAt?: string;
+  sourceUpdatedAt?: string;
+  sourceLastModifiedAt?: string;
   lastContactedAt?: string;
   // ─── Timing Memory ────────────────────────────────
   lastEmailAt?: string;

@@ -20,7 +20,10 @@ export interface AuthUserRecord {
   id: string;
   role: string;
   password: string;
+  mustChangePassword?: boolean;
+  passwordChangedAt?: string;
   updatedAt?: string;
+  updatedBy?: string;
 }
 
 const TOKEN_KEY = 'stylique:apiToken';
@@ -29,6 +32,7 @@ const TOKEN_EXP_KEY = 'stylique:apiTokenExpiresAt';
 export interface AuthSession {
   userId: string;
   role: string;
+  mustChangePassword?: boolean;
   expiresAt?: number;
 }
 
@@ -79,6 +83,7 @@ export function getAuthSession(): AuthSession | null {
     return {
       userId: String(payload.sub),
       role: String(payload.role || ''),
+      mustChangePassword: Boolean(payload.mustChangePassword),
       expiresAt: Number(payload.exp || 0) || undefined,
     };
   } catch {
@@ -111,10 +116,19 @@ export async function getBackendHealth(): Promise<BackendHealth> {
   }
 }
 
-export async function loginToBackend(userId: string, password: string): Promise<{ ok: true; token: string; expiresAt: number }> {
-  const result = await apiFetch<{ ok: true; token: string; expiresAt: number }>('/auth/login', {
+export async function loginToBackend(userId: string, password: string): Promise<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }> {
+  const result = await apiFetch<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ userId, password }),
+  });
+  saveApiToken(result.token, result.expiresAt);
+  return result;
+}
+
+export async function changeOwnPassword(oldPassword: string, newPassword: string): Promise<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }> {
+  const result = await apiFetch<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ oldPassword, newPassword }),
   });
   saveApiToken(result.token, result.expiresAt);
   return result;
@@ -128,7 +142,12 @@ export async function getAuthUsers(): Promise<AuthUserRecord[]> {
 export async function saveAuthUser(user: AuthUserRecord): Promise<AuthUserRecord> {
   const result = await apiFetch<{ ok: true; user: AuthUserRecord }>('/api/auth-users', {
     method: 'POST',
-    body: JSON.stringify({ userId: user.id, role: user.role, password: user.password }),
+    body: JSON.stringify({
+      userId: user.id,
+      role: user.role,
+      password: user.password,
+      mustChangePassword: user.mustChangePassword,
+    }),
   });
   return result.user;
 }

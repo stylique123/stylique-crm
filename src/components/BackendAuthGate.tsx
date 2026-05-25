@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiBaseUrl, getApiToken, getAuthSession, isBackendAuthRequired, loginToBackend } from '@/lib/backend-api';
+import { changeOwnPassword, getApiBaseUrl, getApiToken, getAuthSession, isBackendAuthRequired, loginToBackend } from '@/lib/backend-api';
 import { useUser } from '@/lib/user-context';
 import { TEAM_MEMBERS } from '@/types/crm';
 
@@ -37,6 +37,9 @@ export function BackendAuthGate({ children }: { children: ReactNode }) {
   const [selectedUser, setSelectedUser] = useState(currentUser);
   const [password, setPassword] = useState('');
   const [token, setToken] = useState(getApiToken);
+  const [mustChangePassword, setMustChangePassword] = useState(() => Boolean(getAuthSession()?.mustChangePassword));
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -67,13 +70,32 @@ export function BackendAuthGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (token) {
+  if (token && !mustChangePassword) {
     return (
       <>
         {children}
       </>
     );
   }
+
+  const submitPasswordChange = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (newPassword.length < 8) throw new Error('New password must be at least 8 characters');
+      if (newPassword !== confirmPassword) throw new Error('Passwords do not match');
+      const result = await changeOwnPassword(password, newPassword);
+      setToken(result.token);
+      setMustChangePassword(false);
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Password change failed');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const submit = async () => {
     setLoading(true);
@@ -82,6 +104,7 @@ export function BackendAuthGate({ children }: { children: ReactNode }) {
       setCurrentUser(selectedUser);
       const result = await loginToBackend(selectedUser, password);
       setToken(result.token);
+      setMustChangePassword(Boolean(result.mustChangePassword));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -93,40 +116,75 @@ export function BackendAuthGate({ children }: { children: ReactNode }) {
     <AuthShell>
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <img src="/stylique-logo.png" alt="Stylique" className="h-8 w-8 object-contain" />
+          <img src="/stylique-logo.png" alt="Stylique" className="stylique-logo-mark h-8 w-8 object-contain" />
           <p className="text-sm font-semibold">Stylique CRM</p>
         </div>
-        <p className="text-xs text-muted-foreground">Choose your account and enter your password.</p>
+        <p className="text-xs text-muted-foreground">
+          {mustChangePassword ? 'Set your own password to continue.' : 'Choose your account and enter your password.'}
+        </p>
       </div>
-      <Select
-        value={selectedUser}
-        onValueChange={value => {
-          setSelectedUser(value);
-          setCurrentUser(value);
-        }}
-      >
-        <SelectTrigger className="h-9 text-sm">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {loginMembers.map(member => (
-            <SelectItem key={member.id} value={member.id}>
-              {member.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Input
-        type="password"
-        value={password}
-        onChange={e => setPassword(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-        placeholder="Backend password"
-        className="h-9 text-sm"
-      />
+      {!mustChangePassword ? (
+        <>
+          <Select
+            value={selectedUser}
+            onValueChange={value => {
+              setSelectedUser(value);
+              setCurrentUser(value);
+            }}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {loginMembers.map(member => (
+                <SelectItem key={member.id} value={member.id}>
+                  {member.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+            placeholder="Current password"
+            className="h-9 text-sm"
+          />
+        </>
+      ) : (
+        <>
+          <Input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Temporary password"
+            className="h-9 text-sm"
+          />
+          <Input
+            type="password"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            placeholder="New password"
+            className="h-9 text-sm"
+          />
+          <Input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submitPasswordChange(); }}
+            placeholder="Confirm new password"
+            className="h-9 text-sm"
+          />
+        </>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
-      <Button className="w-full h-9 text-sm" onClick={submit} disabled={loading || !password}>
-        {loading ? 'Connecting...' : 'Enter CRM'}
+      <Button
+        className="w-full h-9 text-sm"
+        onClick={mustChangePassword ? submitPasswordChange : submit}
+        disabled={loading || !password || (mustChangePassword && (!newPassword || !confirmPassword))}
+      >
+        {loading ? 'Saving...' : mustChangePassword ? 'Update Password' : 'Enter CRM'}
       </Button>
     </AuthShell>
   );

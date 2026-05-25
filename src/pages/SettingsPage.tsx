@@ -283,6 +283,7 @@ export default function SettingsPage() {
           id: next.id,
           role: next.role,
           password: passwordDraft.trim(),
+          mustChangePassword: true,
         });
         setAuthUsers(prev => {
           const idx = prev.findIndex(user => user.id === saved.id);
@@ -311,7 +312,7 @@ export default function SettingsPage() {
       return;
     }
     try {
-      const saved = await saveAuthUser({ id: emp.id, role: emp.role, password: password.trim() });
+      const saved = await saveAuthUser({ id: emp.id, role: emp.role, password: password.trim(), mustChangePassword: true });
       setAuthUsers(prev => {
         const idx = prev.findIndex(user => user.id === saved.id);
         if (idx >= 0) {
@@ -480,6 +481,8 @@ export default function SettingsPage() {
                     key={emp.id}
                     employee={emp}
                     password={value}
+                    mustChangePassword={Boolean(auth?.mustChangePassword)}
+                    updatedAt={auth?.updatedAt}
                     visible={visible}
                     onToggleVisible={() => setPasswordVisible(prev => ({ ...prev, [emp.id]: !visible }))}
                     onSave={password => resetPassword(emp, password)}
@@ -913,6 +916,8 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
 function PasswordRow({
   employee,
   password,
+  mustChangePassword,
+  updatedAt,
   visible,
   onToggleVisible,
   onSave,
@@ -920,6 +925,8 @@ function PasswordRow({
 }: {
   employee: EmployeeProfile;
   password: string;
+  mustChangePassword?: boolean;
+  updatedAt?: string;
   visible: boolean;
   onToggleVisible: () => void;
   onSave: (password: string) => void;
@@ -935,7 +942,14 @@ function PasswordRow({
     <div className="grid grid-cols-12 gap-2 items-center rounded-md border border-border/35 bg-card px-3 py-2">
       <div className="col-span-3 min-w-0">
         <div className="text-xs font-medium truncate">{employee.fullName}</div>
-        <div className="text-[10px] text-muted-foreground truncate">{employee.id} · {employee.role}</div>
+        <div className="text-[10px] text-muted-foreground truncate">
+          {employee.id} · {employee.role}{updatedAt ? ` · ${new Date(updatedAt).toLocaleDateString()}` : ''}
+        </div>
+        {mustChangePassword && (
+          <Badge variant="outline" className="mt-1 h-4 border-primary/30 px-1.5 text-[9px] text-primary">
+            Change on login
+          </Badge>
+        )}
       </div>
       <div className="col-span-5">
         <Input

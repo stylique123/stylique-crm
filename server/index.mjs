@@ -57,6 +57,7 @@ const DEFAULT_AUTH_USERS = {
   asjad: {
     password: 'Asjad-CRM-2026!',
     role: 'sdr',
+    mustChangePassword: false,
   },
 };
 
@@ -146,6 +147,21 @@ function sameSecret(a, b) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+function normalizeAuthUser(id, user = {}, fallback = {}) {
+  const now = new Date().toISOString();
+  const source = typeof user === 'string' ? { password: user } : user;
+  const base = typeof fallback === 'string' ? { password: fallback } : fallback;
+  return {
+    id: String(id || source.id || '').trim(),
+    role: String(source.role || base.role || 'user').trim(),
+    password: String(source.password || base.password || ''),
+    mustChangePassword: Boolean(source.mustChangePassword ?? base.mustChangePassword ?? false),
+    passwordChangedAt: source.passwordChangedAt || base.passwordChangedAt || '',
+    updatedAt: source.updatedAt || base.updatedAt || now,
+    updatedBy: source.updatedBy || base.updatedBy || '',
+  };
+}
+
 async function getUsers() {
   let envUsers = {};
   if (process.env.STYLIQUE_USERS_JSON) {
@@ -155,15 +171,15 @@ async function getUsers() {
       envUsers = {};
     }
   }
-  const baseUsers = { ...DEFAULT_AUTH_USERS, ...envUsers };
+  const baseUsers = Object.fromEntries(
+    Object.entries({ ...DEFAULT_AUTH_USERS, ...envUsers })
+      .map(([id, user]) => [id, normalizeAuthUser(id, user)]),
+  );
   const stored = await readBucket('auth-users');
   if (!Array.isArray(stored) || stored.length === 0) return baseUsers;
   const storedUsers = Object.fromEntries(stored
     .filter(user => user?.id && user?.password)
-    .map(user => [String(user.id), {
-      password: String(user.password),
-      role: String(user.role || envUsers[String(user.id)]?.role || 'user'),
-    }])
+    .map(user => [String(user.id), normalizeAuthUser(user.id, user, baseUsers[String(user.id)] || {})])
   );
   return { ...baseUsers, ...storedUsers };
 }
@@ -174,40 +190,60 @@ async function listAuthUsers() {
     id,
     role: String(user.role || 'user'),
     password: String(user.password || ''),
+    mustChangePassword: Boolean(user.mustChangePassword),
+    passwordChangedAt: user.passwordChangedAt || '',
+    updatedAt: user.updatedAt || '',
+    updatedBy: user.updatedBy || '',
   })).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function saveAuthUsers(users) {
+async function saveAuthUsers(users, updatedBy = '') {
+  const existing = Object.fromEntries((await listAuthUsers()).map(user => [user.id, user]));
+  const now = new Date().toISOString();
   const normalized = Array.isArray(users)
     ? users
         .filter(user => user?.id && user?.password)
-        .map(user => ({
-          id: String(user.id).trim(),
-          role: String(user.role || 'user').trim(),
-          password: String(user.password),
-          updatedAt: new Date().toISOString(),
-        }))
+        .map(user => {
+          const id = String(user.id).trim();
+          const previous = existing[id] || {};
+          const passwordChanged = previous.password && previous.password !== String(user.password);
+          return normalizeAuthUser(id, {
+            ...previous,
+            ...user,
+            mustChangePassword: Boolean(user.mustChangePassword ?? previous.mustChangePassword ?? passwordChanged),
+            updatedAt: now,
+            updatedBy,
+          });
+        })
     : [];
   await writeBucket('auth-users', normalized);
   return normalized;
 }
 
-async function upsertAuthUser(userId, role, password) {
+async function upsertAuthUser(userId, role, password, options = {}) {
   if (!userId || !password) {
     return { status: 400, body: { ok: false, error: 'userId and password are required' } };
   }
   const current = await listAuthUsers();
   const id = String(userId).trim();
   const idx = current.findIndex(user => user.id === id);
-  const next = {
-    id,
-    role: String(role || current[idx]?.role || 'user').trim(),
+  const previous = idx >= 0 ? current[idx] : {};
+  const next = normalizeAuthUser(id, {
+    ...previous,
     password: String(password),
+    role: String(role || previous.role || 'user').trim(),
+    mustChangePassword: Boolean(options.mustChangePassword ?? true),
+    passwordChangedAt: options.passwordChangedAt || previous.passwordChangedAt || '',
     updatedAt: new Date().toISOString(),
-  };
+    updatedBy: options.updatedBy || '',
+  });
   if (idx >= 0) current[idx] = next; else current.push(next);
-  await saveAuthUsers(current);
+  await saveAuthUsers(current, options.updatedBy || '');
   return { status: 200, body: { ok: true, user: next } };
+}
+
+function passwordIsAcceptable(value) {
+  return typeof value === 'string' && value.trim().length >= 8;
 }
 
 function canAccessBucket(user, bucket, method) {
@@ -698,8 +734,13 @@ export async function router(req, res) {
       return send(res, 401, { ok: false, error: 'Invalid credentials' }, corsHeaders);
     }
     const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 12;
-    const token = sign({ sub: String(body.userId), role: String(user.role || 'user'), exp });
-    return send(res, 200, { ok: true, token, expiresAt: exp }, corsHeaders);
+    const token = sign({
+      sub: String(body.userId),
+      role: String(user.role || 'user'),
+      mustChangePassword: Boolean(user.mustChangePassword),
+      exp,
+    });
+    return send(res, 200, { ok: true, token, expiresAt: exp, mustChangePassword: Boolean(user.mustChangePassword) }, corsHeaders);
   }
 
   const user = requireAuth(req);
@@ -707,6 +748,33 @@ export async function router(req, res) {
 
   if (pathname === '/auth/me' && req.method === 'GET') {
     return send(res, 200, { ok: true, user }, corsHeaders);
+  }
+
+  if (pathname === '/auth/change-password' && req.method === 'POST') {
+    const body = await readBody(req);
+    const oldPassword = String(body.oldPassword || body.currentPassword || '');
+    const newPassword = String(body.newPassword || '');
+    if (!passwordIsAcceptable(newPassword)) {
+      return send(res, 400, { ok: false, error: 'New password must be at least 8 characters' }, corsHeaders);
+    }
+    const users = await listAuthUsers();
+    const idx = users.findIndex(item => item.id === String(user.sub));
+    if (idx < 0 || !sameSecret(oldPassword, users[idx].password)) {
+      return send(res, 401, { ok: false, error: 'Current password is incorrect' }, corsHeaders);
+    }
+    const now = new Date().toISOString();
+    users[idx] = normalizeAuthUser(users[idx].id, {
+      ...users[idx],
+      password: newPassword,
+      mustChangePassword: false,
+      passwordChangedAt: now,
+      updatedAt: now,
+      updatedBy: String(user.sub),
+    });
+    await saveAuthUsers(users, String(user.sub));
+    const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 12;
+    const token = sign({ sub: String(user.sub), role: String(users[idx].role || user.role || 'user'), mustChangePassword: false, exp });
+    return send(res, 200, { ok: true, token, expiresAt: exp, mustChangePassword: false }, corsHeaders);
   }
 
   if (pathname === '/api/auth-users' && req.method === 'GET') {
@@ -721,7 +789,7 @@ export async function router(req, res) {
       return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
     }
     const body = await readBody(req);
-    const saved = await saveAuthUsers(body.users || body.data || []);
+    const saved = await saveAuthUsers(body.users || body.data || [], String(user.sub));
     return send(res, 200, { ok: true, users: saved }, corsHeaders);
   }
 
@@ -730,7 +798,10 @@ export async function router(req, res) {
       return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
     }
     const body = await readBody(req);
-    const result = await upsertAuthUser(body.userId || body.id, body.role, body.password);
+    const result = await upsertAuthUser(body.userId || body.id, body.role, body.password, {
+      mustChangePassword: body.mustChangePassword ?? true,
+      updatedBy: String(user.sub),
+    });
     return send(res, result.status, result.body, corsHeaders);
   }
 

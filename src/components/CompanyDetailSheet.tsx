@@ -460,6 +460,17 @@ export function CompanyDetailSheet({ open, onOpenChange, lead, onAction, onLeadU
                   <InfoRow label="Next Follow-up" value={format(new Date(freshLead.nextFollowUp), 'MMM d, yyyy')} />
                 )}
                 <InfoRow label="In Pipeline" value={`${Math.floor((Date.now() - new Date(freshLead.createdAt).getTime()) / 86400000)}d`} />
+                <InfoRow label="Created" value={format(new Date(freshLead.createdAt), 'MMM d, yyyy')} />
+                <InfoRow label="Last Updated" value={format(new Date(freshLead.updatedAt), 'MMM d, h:mm a')} />
+                {freshLead.importedAt && (
+                  <InfoRow
+                    label="Imported"
+                    value={`${format(new Date(freshLead.importedAt), 'MMM d, yyyy')}${freshLead.importFileName ? ` · ${freshLead.importFileName}` : ''}`}
+                  />
+                )}
+                {freshLead.sourceLastModifiedAt && (
+                  <InfoRow label="Source Modified" value={format(new Date(freshLead.sourceLastModifiedAt), 'MMM d, yyyy')} />
+                )}
                 {freshLead.lastContactedAt && (
                   <InfoRow label="Last Contact" value={format(new Date(freshLead.lastContactedAt), 'MMM d')} />
                 )}

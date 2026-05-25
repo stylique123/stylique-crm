@@ -17,7 +17,7 @@
     --popover: 252 12% 13%;
     --popover-foreground: 37 55% 90%;
 
-    --primary: 260 69% 55%;
+    --primary: 268 86% 58%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 252 9% 20%;
@@ -26,7 +26,7 @@
     --muted: 252 8% 24%;
     --muted-foreground: 254 10% 66%;
 
-    --accent: 260 44% 22%;
+    --accent: 270 52% 24%;
     --accent-foreground: 37 55% 90%;
 
     --destructive: 350 86% 65%;
@@ -34,18 +34,18 @@
 
     --border: 252 8% 28%;
     --input: 252 8% 22%;
-    --ring: 260 69% 55%;
+    --ring: 268 86% 58%;
 
     --radius: 0.5rem;
 
     --sidebar-background: 0 0% 8%;
     --sidebar-foreground: 254 10% 66%;
-    --sidebar-primary: 260 69% 55%;
+    --sidebar-primary: 268 86% 58%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 252 10% 16%;
     --sidebar-accent-foreground: 37 55% 90%;
     --sidebar-border: 252 8% 22%;
-    --sidebar-ring: 260 69% 55%;
+    --sidebar-ring: 268 86% 58%;
 
     --success: 82 58% 58%;
     --success-foreground: 0 0% 100%;
@@ -63,6 +63,10 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    background:
+      radial-gradient(circle at 12% -8%, hsl(268 86% 42% / 0.28), transparent 30rem),
+      radial-gradient(circle at 86% 0%, hsl(292 88% 34% / 0.18), transparent 28rem),
+      hsl(var(--background));
     font-family: 'DM Sans', system-ui, sans-serif;
     font-size: 14px;
     letter-spacing: 0;
@@ -77,6 +81,10 @@
 @layer components {
   .stylique-surface {
     @apply border border-border/60 bg-card text-card-foreground;
+  }
+
+  .stylique-logo-mark {
+    filter: drop-shadow(0 0 18px hsl(var(--primary) / 0.45));
   }
 }
 
