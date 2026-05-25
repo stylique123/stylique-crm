@@ -33,7 +33,7 @@ export interface AuthSession {
   userId: string;
   role: string;
   mustChangePassword?: boolean;
-  expiresAt?: number;
+  expiresAt?: number | null;
 }
 
 export function isBackendAuthRequired(): boolean {
@@ -57,11 +57,15 @@ export function getApiToken(): string {
   return window.localStorage.getItem(TOKEN_KEY) || '';
 }
 
-export function saveApiToken(token: string, expiresAt?: number) {
+export function saveApiToken(token: string, expiresAt?: number | null) {
   if (typeof window === 'undefined') return;
   if (token) {
     window.localStorage.setItem(TOKEN_KEY, token);
-    if (expiresAt) window.localStorage.setItem(TOKEN_EXP_KEY, String(expiresAt));
+    if (expiresAt) {
+      window.localStorage.setItem(TOKEN_EXP_KEY, String(expiresAt));
+    } else {
+      window.localStorage.removeItem(TOKEN_EXP_KEY);
+    }
   } else {
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(TOKEN_EXP_KEY);
@@ -116,8 +120,8 @@ export async function getBackendHealth(): Promise<BackendHealth> {
   }
 }
 
-export async function loginToBackend(userId: string, password: string): Promise<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }> {
-  const result = await apiFetch<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }>('/auth/login', {
+export async function loginToBackend(userId: string, password: string): Promise<{ ok: true; token: string; expiresAt?: number | null; mustChangePassword?: boolean }> {
+  const result = await apiFetch<{ ok: true; token: string; expiresAt?: number | null; mustChangePassword?: boolean }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ userId, password }),
   });
@@ -125,8 +129,8 @@ export async function loginToBackend(userId: string, password: string): Promise<
   return result;
 }
 
-export async function changeOwnPassword(oldPassword: string, newPassword: string): Promise<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }> {
-  const result = await apiFetch<{ ok: true; token: string; expiresAt: number; mustChangePassword?: boolean }>('/auth/change-password', {
+export async function changeOwnPassword(oldPassword: string, newPassword: string): Promise<{ ok: true; token: string; expiresAt?: number | null; mustChangePassword?: boolean }> {
+  const result = await apiFetch<{ ok: true; token: string; expiresAt?: number | null; mustChangePassword?: boolean }>('/auth/change-password', {
     method: 'POST',
     body: JSON.stringify({ oldPassword, newPassword }),
   });

@@ -1261,14 +1261,12 @@ export async function router(req, res) {
     if (!body.userId || !sameSecret(body.password, user.password)) {
       return send(res, 401, { ok: false, error: 'Invalid credentials' }, corsHeaders);
     }
-    const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 12;
     const token = sign({
       sub: String(body.userId),
       role: String(user.role || 'user'),
       mustChangePassword: Boolean(user.mustChangePassword),
-      exp,
     });
-    return send(res, 200, { ok: true, token, expiresAt: exp, mustChangePassword: Boolean(user.mustChangePassword) }, corsHeaders);
+    return send(res, 200, { ok: true, token, expiresAt: null, mustChangePassword: Boolean(user.mustChangePassword) }, corsHeaders);
   }
 
   const user = requireAuth(req);
@@ -1300,9 +1298,8 @@ export async function router(req, res) {
       updatedBy: String(user.sub),
     });
     await saveAuthUsers(users, String(user.sub));
-    const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 12;
-    const token = sign({ sub: String(user.sub), role: String(users[idx].role || user.role || 'user'), mustChangePassword: false, exp });
-    return send(res, 200, { ok: true, token, expiresAt: exp, mustChangePassword: false }, corsHeaders);
+    const token = sign({ sub: String(user.sub), role: String(users[idx].role || user.role || 'user'), mustChangePassword: false });
+    return send(res, 200, { ok: true, token, expiresAt: null, mustChangePassword: false }, corsHeaders);
   }
 
   if (pathname === '/api/auth-users' && req.method === 'GET') {
