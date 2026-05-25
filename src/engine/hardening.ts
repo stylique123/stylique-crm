@@ -143,7 +143,7 @@ export function detectStuckLeads(leads: Lead[]): StuckLead[] {
 
     // Meeting booked but not completed > 5 days past meeting
     if (state.lifecycle_stage === 'meeting_booked') {
-      const lastMeeting = lead.meetingNotes?.at(-1);
+      const lastMeeting = lead.meetingNotes?.[lead.meetingNotes.length - 1];
       if (lastMeeting && new Date(lastMeeting.date).getTime() < now - 5 * 86400000) {
         stuck.push({ lead, state, reason: 'Meeting date passed 5+ days ago — no outcome added', daysSinceUpdate: daysSince });
         continue;

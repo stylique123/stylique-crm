@@ -180,7 +180,10 @@ function getCardReminder(lead: Lead, cs: CanonicalState, view: PipelineView): st
   const col = getColumnKey(cs, lead, view);
   if (col === 'new_lead') return 'No outreach yet';
   if (col === 'contacted') return 'No response yet';
-  if (col === 'replied') return lead.notes?.split('\n').filter(Boolean).at(-1)?.replace(/^\[[^\]]+\]\s*/, '') || 'Reply received';
+  if (col === 'replied') {
+    const notes = lead.notes?.split('\n').filter(Boolean) || [];
+    return notes[notes.length - 1]?.replace(/^\[[^\]]+\]\s*/, '') || 'Reply received';
+  }
   if (col === 'meeting_booked') return getMeetingBookedSubState(lead) === 'result_needed' ? 'Meeting result missing' : 'Meeting scheduled';
   if (col === 'meeting_completed') return 'Meeting result missing';
   if (col === 'decision_pending') return 'Awaiting decision';

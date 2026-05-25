@@ -72,7 +72,8 @@ describe('Stylique CRM high-volume flow hardening', () => {
       executeMeetingBooked(lead, lead.assignedTo, bridge, isoPlus(1), 'teams', `https://meet.example/${lead.id}`);
       lead = current(store, lead);
 
-      const scenario = Number(lead.id.split('-').at(-1)) % 6;
+      const idParts = lead.id.split('-');
+      const scenario = Number(idParts[idParts.length - 1]) % 6;
       if (scenario === 3) {
         processMeetingOutcome(lead, 'followup_later', 'Needs a second stakeholder next week.', 'Follow up after internal discussion', lead.assignedTo, bridge, isoPlus(7));
         continue;
