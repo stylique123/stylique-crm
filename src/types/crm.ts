@@ -1043,7 +1043,6 @@ const SEED_TEAM_MEMBERS: TeamMemberLite[] = [
   { id: 'taiba', name: 'Taiba', role: 'SDR', region: 'UK' },
   { id: 'khadija', name: 'Khadija', role: 'SDR', region: 'Pakistan' },
   { id: 'asjad', name: 'Asjad', role: 'SDR', region: 'Pakistan' },
-  { id: 'mashael', name: 'Mashael', role: 'SDR', region: 'UAE' },
 ];
 
 /**

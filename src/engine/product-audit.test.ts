@@ -100,7 +100,7 @@ describe('Stylique product audit invariants', () => {
     setTeamMembersFromEmployees([
       { id: 'abdullah', fullName: 'Abdullah', role: 'ceo', active: true },
       { id: 'areeba', fullName: 'Areeba', role: 'sdr', active: true },
-      { id: 'mashael', fullName: 'Mashael', role: 'sdr', active: false },
+      { id: 'former-sdr', fullName: 'Former SDR', role: 'sdr', active: false },
     ]);
     expect(TEAM_MEMBERS.map(m => m.id)).toEqual(['abdullah', 'areeba']);
     expect(SALES_MEMBERS.map(m => m.id)).toEqual(['areeba']);

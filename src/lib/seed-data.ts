@@ -188,7 +188,7 @@ export function seedSampleData() {
 
   add({
     companyName: 'Desert Glow UAE', contactName: 'Mariam Al-Rashid', contactEmail: 'mariam@desertglow.ae',
-    contactPhone: '+971-50-4001', website: 'https://desertglow.ae', assignedTo: 'mashael', platform: 'shopify',
+    contactPhone: '+971-50-4001', website: 'https://desertglow.ae', assignedTo: 'asjad', platform: 'shopify',
     source_detail: 'instagram',
     contacts: makeContacts(
       { name: 'Mariam Al-Rashid', role: 'CEO', email: 'mariam@desertglow.ae', phone: '+971-50-4001' },
@@ -291,7 +291,7 @@ export function seedSampleData() {
 
   add({
     companyName: 'Golden Sands Beauty', contactName: 'Hessa Al-Maktoum', contactEmail: 'hessa@goldensands.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'sdr-contacted',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'sdr-contacted',
     lastContactedAt: daysAgo(6),
     contacts: makeContacts(
       { name: 'Hessa Al-Maktoum', role: 'CEO', email: 'hessa@goldensands.ae', phone: '+971-55-4010', reached: true, firstReachedAt: daysAgo(6) },
@@ -346,7 +346,7 @@ export function seedSampleData() {
 
   add({
     companyName: 'Sapphire Jewels Dubai', contactName: 'Layla Hassan', contactEmail: 'layla@sapphirejewels.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'sdr-contacted',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'sdr-contacted',
     lastContactedAt: daysAgo(2),
     contacts: makeContacts(
       { name: 'Layla Hassan', role: 'Managing Director', email: 'layla@sapphirejewels.ae', phone: '+971-56-4020', reached: true, firstReachedAt: daysAgo(2) },
@@ -406,7 +406,7 @@ export function seedSampleData() {
 
   add({
     companyName: 'Marina Cosmetics UAE', contactName: 'Fatima Al-Zaabi', contactEmail: 'fatima@marinacosmetics.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'sdr-replied',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'sdr-replied',
     lastContactedAt: daysAgo(2), lastReplyAt: daysAgo(2),
     contacts: makeContacts(
       { name: 'Fatima Al-Zaabi', role: 'CEO', email: 'fatima@marinacosmetics.ae', reached: true, firstReachedAt: daysAgo(6) },
@@ -421,7 +421,7 @@ export function seedSampleData() {
   // Inbound replied
   add({
     companyName: 'Lush Garden Beauty', contactName: 'Amina Khalil', contactEmail: 'amina@lushgarden.ae',
-    assignedTo: 'mashael', pipeline: 'inbound', stage: 'inbound-qualified', entry_flow: 'inbound',
+    assignedTo: 'asjad', pipeline: 'inbound', stage: 'inbound-qualified', entry_flow: 'inbound',
     inbound_type: 'manual_inbound', source_detail: 'instagram_dm',
     lastContactedAt: daysAgo(0),
     contacts: makeContacts(
@@ -485,14 +485,14 @@ export function seedSampleData() {
 
   add({
     companyName: 'Abu Dhabi Luxury', contactName: 'Amira Hassan', contactEmail: 'amira@adluxury.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'meeting-booked',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'meeting-booked',
     meeting_status: 'booked',
     contacts: makeContacts(
       { name: 'Amira Hassan', role: 'CEO', email: 'amira@adluxury.ae', reached: true, firstReachedAt: daysAgo(4) },
       { name: 'Sara Bin Ahmed', role: 'Marketing', email: 'sara@adluxury.ae', reached: true, firstReachedAt: daysAgo(2) }
     ),
     contactsReachedCount: 2,
-    meetingNotes: [{ id: uid(), date: daysFromNow(2), type: 'zoom', summary: '', outcome: '', nextStep: '', attendees: ['mashael'], actionItems: [] }],
+    meetingNotes: [{ id: uid(), date: daysFromNow(2), type: 'zoom', summary: '', outcome: '', nextStep: '', attendees: ['asjad'], actionItems: [] }],
     notes: 'High-value UAE luxury brand — Zoom demo upcoming',
     createdAt: daysAgo(6),
     intelligence: { source: 'instagram', instagramFollowers: 95000, tier: 'tier-1' },
@@ -565,14 +565,14 @@ export function seedSampleData() {
 
   add({
     companyName: 'Sharjah Chic', contactName: 'Rania Al-Qassimi', contactEmail: 'rania@sharjahchic.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'meeting-completed',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'meeting-completed',
     meeting_status: 'completed',
     contacts: makeContacts(
       { name: 'Rania Al-Qassimi', role: 'Founder', email: 'rania@sharjahchic.ae', reached: true, firstReachedAt: daysAgo(5) },
       { name: 'Dana Al-Hosani', role: 'Marketing', email: 'dana@sharjahchic.ae', reached: true, firstReachedAt: daysAgo(3) }
     ),
     contactsReachedCount: 2,
-    meetingNotes: [{ id: uid(), date: daysAgo(2), type: 'zoom', summary: 'Wants to move forward', outcome: 'interested', nextStep: 'Send proposal', attendees: ['mashael'], actionItems: [] }],
+    meetingNotes: [{ id: uid(), date: daysAgo(2), type: 'zoom', summary: 'Wants to move forward', outcome: 'interested', nextStep: 'Send proposal', attendees: ['asjad'], actionItems: [] }],
     notes: 'Interested — send proposal',
     createdAt: daysAgo(10),
     intelligence: { source: 'instagram', instagramFollowers: 68000, tier: 'tier-1' },
@@ -679,7 +679,7 @@ export function seedSampleData() {
   // Ready to activate
   add({
     companyName: 'Fujairah Fashion Hub', contactName: 'Nouf Al-Sharqi', contactEmail: 'nouf@fujairahfashion.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'trial-proposed',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'trial-proposed',
     action_owner: 'onboarding', trial_status: 'setup-pending',
     approvedBy: 'hira',
     credentials: { username: 'fujairahfashion_admin', password: 'trial2026', loginUrl: 'https://fujairahfashion.ae/admin' },
@@ -807,7 +807,7 @@ export function seedSampleData() {
 
   add({
     companyName: 'Oasis Beauty Dubai', contactName: 'Layla Al-Rashid', contactEmail: 'layla@oasisbeauty.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'converted',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'converted',
     trial_status: 'converted', subscriptionPlan: 'growth', subscriptionStatus: 'active',
     paymentStatus: 'paid', paymentReceivedAt: daysAgo(5), subscriptionStartDate: daysAgo(5),
     nextPaymentDate: daysFromNow(25),
@@ -878,7 +878,7 @@ export function seedSampleData() {
   // Cold — no response
   add({
     companyName: 'Al Ain Fashion', contactName: 'Maha Al-Ketbi', contactEmail: 'maha@alainfashion.ae',
-    assignedTo: 'mashael', platform: 'shopify', stage: 'cold-no-response',
+    assignedTo: 'asjad', platform: 'shopify', stage: 'cold-no-response',
     contacts: makeContacts(
       { name: 'Maha Al-Ketbi', role: 'Owner', email: 'maha@alainfashion.ae', reached: true, firstReachedAt: daysAgo(25) },
       { name: 'Shamsa Bin Zayed', role: 'Admin', email: 'shamsa@alainfashion.ae' }
@@ -918,7 +918,7 @@ export function seedSampleData() {
     { type: 'stage-change' as const, description: 'Trial proposed for Silk & Satin Fashion — awaiting CEO approval', leadId: leads[35].id, createdBy: 'areeba' },
     { type: 'stage-change' as const, description: 'Pacific Beauty Co moved to Awaiting Payment — proposal accepted', leadId: leads[39].id, createdBy: 'abdullah' },
     { type: 'payment' as const, description: 'Payment overdue for Highland Beauty Scotland — 5 days past due', leadId: leads[43].id, createdBy: 'system' },
-    { type: 'conversion' as const, description: 'Oasis Beauty Dubai converted to Growth plan — $249/mo', leadId: leads[44].id, createdBy: 'mashael' },
+    { type: 'conversion' as const, description: 'Oasis Beauty Dubai converted to Growth plan — $249/mo', leadId: leads[44].id, createdBy: 'asjad' },
     { type: 'conversion' as const, description: 'Boston Glow Aesthetics converted to Enterprise plan — $499/mo', leadId: leads[45].id, createdBy: 'areeba' },
   ];
 
@@ -975,9 +975,9 @@ function seedOperationalTestData(leads: Lead[]) {
     createdAt: new Date(now.getTime() - 48 * 3600000).toISOString(), updatedAt: yesterday + 'T10:00:00.000Z',
   });
 
-  // 4. Unpaid leave (Mashael — yesterday)
+  // 4. Unpaid leave (Asjad — yesterday)
   leaveRequests.push({
-    id: safeId('leave'), userId: 'mashael', type: 'full_day',
+    id: safeId('leave'), userId: 'asjad', type: 'full_day',
     startDate: yesterday, reason: 'Personal matter (unpaid leave)',
     status: 'approved', paidOrUnpaid: 'unpaid', isLateRequest: false,
     approvedBy: 'hira',
@@ -996,9 +996,9 @@ function seedOperationalTestData(leads: Lead[]) {
     status: 'late', checkInTime: '10:30', isLate: true,
   });
 
-  // On leave (Mashael — yesterday)
+  // On leave (Asjad — yesterday)
   attendance.push({
-    id: safeId('attendance'), userId: 'mashael', date: yesterday,
+    id: safeId('attendance'), userId: 'asjad', date: yesterday,
     status: 'leave_approved', leaveReason: 'Personal matter (unpaid leave)',
   });
 
@@ -1071,7 +1071,7 @@ function seedOperationalTestData(leads: Lead[]) {
   directives.push({
     id: safeId('directive'),
     senderId: 'hira', senderName: 'Hira',
-    receiverId: 'mashael', receiverName: 'Mashael',
+    receiverId: 'asjad', receiverName: 'Asjad',
     scope: 'specific',
     targets: [{ leadId: leads[44]?.id || 'general', companyName: leads[44]?.companyName || 'Oasis Beauty Dubai' }],
     actionType: 'follow_up_today',
@@ -1083,7 +1083,7 @@ function seedOperationalTestData(leads: Lead[]) {
     acknowledgedAt: new Date(now.getTime() - 22 * 3600000).toISOString(),
     completedAt: new Date(now.getTime() - 18 * 3600000).toISOString(),
     createdAt: new Date(now.getTime() - 24 * 3600000).toISOString(),
-    outcomes: [{ targetLeadId: leads[44]?.id || 'general', outcome: 'contacted', notes: 'Spoke with client, usage is good', completedAt: new Date(now.getTime() - 18 * 3600000).toISOString(), completedBy: 'mashael' }],
+    outcomes: [{ targetLeadId: leads[44]?.id || 'general', outcome: 'contacted', notes: 'Spoke with client, usage is good', completedAt: new Date(now.getTime() - 18 * 3600000).toISOString(), completedBy: 'asjad' }],
   });
 
   safeWrite(directiveKey, directives);

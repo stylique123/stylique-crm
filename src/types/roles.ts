@@ -70,7 +70,6 @@ const SEED_TEAM: TeamMember[] = [
   { id: 'taiba', name: 'Taiba', role: 'sdr', region: 'UK' },
   { id: 'khadija', name: 'Khadija', role: 'sdr', region: 'Pakistan' },
   { id: 'asjad', name: 'Asjad', role: 'sdr', region: 'Pakistan' },
-  { id: 'mashael', name: 'Mashael', role: 'sdr', region: 'UAE' },
 ];
 
 /** Live roster — rebuilt in-place from the employee store so legacy callers

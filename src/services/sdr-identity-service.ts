@@ -16,7 +16,6 @@ const DEFAULT_CONFIGS: SDRIdentityConfig[] = [
   { sdrId: 'areeba', apolloIdentity: 'areeba@stylique.co', outlookMailbox: '', replyMailbox: '', twilioNumbers: [], defaultTwilioNumber: '' },
   { sdrId: 'taiba', apolloIdentity: 'taiba@stylique.co', outlookMailbox: '', replyMailbox: '', twilioNumbers: [], defaultTwilioNumber: '' },
   { sdrId: 'khadija', apolloIdentity: 'khadija@stylique.co', outlookMailbox: '', replyMailbox: '', twilioNumbers: [], defaultTwilioNumber: '' },
-  { sdrId: 'mashael', apolloIdentity: 'mashael@stylique.co', outlookMailbox: '', replyMailbox: '', twilioNumbers: [], defaultTwilioNumber: '' },
 ];
 
 function loadConfigs(): SDRIdentityConfig[] {

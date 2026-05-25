@@ -392,21 +392,6 @@ const DEFAULT_EMPLOYEES: EmployeeProfile[] = [
     updatedAt: new Date().toISOString(),
   },
   {
-    id: 'mashael', fullName: 'Mashael', role: 'sdr', region: 'UAE', title: 'Sales Development Representative',
-    email: '', phone: '', department: 'Sales', manager: 'hira',
-    active: true, employmentStatus: 'probationary',
-    joiningDate: '2026-03-12', probationStartDate: '2026-03-12', probationEndDate: '2026-06-12',
-    baseSalary: 40000, currency: 'PKR',
-    leavePolicyId: 'policy-probation-unpaid',
-    commissionRuleIds: ['comm-outbound-meeting'],
-    kpiAssignments: ['kpi-brands-day'],
-    annualLeaveAllowance: 0, leaveUsed: 0, leaveRemaining: 0,
-    inboundPermission: false, outboundPermission: true,
-    canImportLeads: true, canAddManualLeads: true, canSendDirectives: false, canApprove: false, dataVisibility: 'own',
-    timezone: 'Asia/Dubai', shiftStart: '10:00', shiftEnd: '19:00', graceMinutes: 15,
-    updatedAt: new Date().toISOString(),
-  },
-  {
     id: 'muneeb', fullName: 'Muneeb', role: 'onboarding', title: 'Onboarding Specialist',
     email: '', phone: '', department: 'Operations', manager: 'hira',
     active: true, employmentStatus: 'confirmed',
@@ -552,7 +537,7 @@ const EmployeeContext = createContext<EmployeeContextValue | null>(null);
 
 const SALARY_DEFAULTS: Record<string, number> = {
   abdullah: 250000, hira: 200000, areeba: 55000, taiba: 55000,
-  khadija: 40000, mashael: 40000, muneeb: 50000, namra: 0, asjad: 0,
+  khadija: 40000, muneeb: 50000, namra: 0, asjad: 0,
 };
 
 function loadEmployees(): EmployeeProfile[] {

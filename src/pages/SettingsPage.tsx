@@ -123,6 +123,7 @@ export default function SettingsPage() {
   const [isNew, setIsNew] = useState(false);
   const [reassigning, setReassigning] = useState<EmployeeProfile | null>(null);
   const [reassignTo, setReassignTo] = useState('');
+  const [showRemoved, setShowRemoved] = useState(false);
 
   useEffect(() => {
     getBackendHealth().then(setBackendHealth);
@@ -170,11 +171,13 @@ export default function SettingsPage() {
     empStore.employees.find(emp => emp.active && emp.id !== employee.id && (emp.role === 'ceo' || emp.role === 'coo'))?.id ||
     '';
 
-  const sorted = [...empStore.employees].sort((a, b) => {
+  const visibleEmployees = empStore.employees.filter(emp => showRemoved || emp.active);
+  const sorted = [...visibleEmployees].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
     const order = ['ceo', 'coo', 'operations', 'sdr', 'onboarding'];
     return order.indexOf(a.role) - order.indexOf(b.role) || a.fullName.localeCompare(b.fullName);
   });
+  const removedCount = empStore.employees.filter(emp => !emp.active).length;
 
   const openAdd = () => {
     setEditing(blankEmployee());
@@ -188,15 +191,33 @@ export default function SettingsPage() {
     setPasswordDraft(findAuthUser(e.id)?.password || '');
   };
 
+  const deactivateEmployee = (e: EmployeeProfile) => {
+    if (!canManageSettings) { toast.error('Only CEO/COO can remove teammates'); return; }
+    if (e.role === 'ceo' && empStore.employees.filter(emp => emp.active && emp.role === 'ceo' && emp.id !== e.id).length === 0) {
+      toast.error('Keep at least one active CEO account');
+      return;
+    }
+    const ownedCount = countOwnedRecords(e.id);
+    if (ownedCount > 0) {
+      setReassignTo(defaultReassignOwner(e));
+      setReassigning(e);
+      return;
+    }
+    empStore.saveEmployee({
+      ...e,
+      active: false,
+      employmentStatus: 'inactive',
+    });
+    void removeLoginForEmployee(e.id);
+    toast.success(`${e.fullName} removed from active CRM and login access revoked`);
+    setEditing(null);
+  };
+
   const toggleActive = (e: EmployeeProfile) => {
     const nextActive = !e.active;
     if (!nextActive) {
-      const ownedCount = countOwnedRecords(e.id);
-      if (ownedCount > 0) {
-        setReassignTo(defaultReassignOwner(e));
-        setReassigning(e);
-        return;
-      }
+      deactivateEmployee(e);
+      return;
     }
     empStore.saveEmployee({
       ...e,
@@ -204,11 +225,8 @@ export default function SettingsPage() {
       employmentStatus: nextActive ? (e.employmentStatus === 'inactive' ? 'confirmed' : e.employmentStatus) : 'inactive',
     });
     toast.success(
-      nextActive
-        ? `${e.fullName} reactivated`
-        : `${e.fullName} deactivated`
+      `${e.fullName} reactivated`
     );
-    if (!nextActive) void removeLoginForEmployee(e.id);
   };
 
   const completeReassignment = () => {
@@ -246,7 +264,7 @@ export default function SettingsPage() {
     });
     empStore.saveEmployee({ ...reassigning, active: false, employmentStatus: 'inactive' });
     void removeLoginForEmployee(reassigning.id);
-    toast.success(`${reassigning.fullName} deactivated · ${reassigned} records reassigned`);
+    toast.success(`${reassigning.fullName} removed · ${reassigned} records reassigned · login revoked`);
     setReassigning(null);
     setReassignTo('');
   };
@@ -371,13 +389,25 @@ export default function SettingsPage() {
           <Card>
             <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Team Roster</CardTitle>
-              {canManageSettings && (
-                <Button size="sm" className="h-7 text-xs" onClick={openAdd}>
-                  <Plus className="h-3 w-3 mr-1" /> Add teammate
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {removedCount > 0 && (
+                  <ToggleRow
+                    label={`Show removed (${removedCount})`}
+                    checked={showRemoved}
+                    onChange={setShowRemoved}
+                  />
+                )}
+                {canManageSettings && (
+                  <Button size="sm" className="h-7 text-xs" onClick={openAdd}>
+                    <Plus className="h-3 w-3 mr-1" /> Add teammate
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="px-0 pb-2">
+              <div className="mx-4 mb-3 rounded-md border border-border/35 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                Removing a teammate revokes CRM login, hides them from active dropdowns, and requires reassignment before any owned records move.
+              </div>
               <div className="grid grid-cols-12 gap-2 px-4 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium border-b border-border/20">
                 <div className="col-span-3">Name</div>
                 <div className="col-span-2">Role</div>
@@ -413,10 +443,16 @@ export default function SettingsPage() {
                   <div className="col-span-1 flex items-center justify-end gap-1">
                     {canManageSettings && (
                       <>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(emp)}>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title={`Edit ${emp.fullName}`} onClick={() => openEdit(emp)}>
                           <Pencil className="h-3 w-3" />
                         </Button>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => toggleActive(emp)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          title={emp.active ? `Remove ${emp.fullName} from CRM` : `Restore ${emp.fullName}`}
+                          onClick={() => toggleActive(emp)}
+                        >
                           {emp.active ? <UserMinus className="h-3 w-3 text-destructive/80" /> : <UserCheck className="h-3 w-3 text-success" />}
                         </Button>
                       </>
@@ -858,6 +894,16 @@ export default function SettingsPage() {
             </div>
 
             <DialogFooter className="mt-3">
+              {!isNew && editing.active && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="mr-auto"
+                  onClick={() => deactivateEmployee(editing)}
+                >
+                  <UserMinus className="mr-1.5 h-3.5 w-3.5" /> Remove access
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
               <Button size="sm" onClick={submitEdit}>{isNew ? 'Add teammate' : 'Save changes'}</Button>
             </DialogFooter>

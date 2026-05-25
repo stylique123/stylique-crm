@@ -35,7 +35,6 @@ Do not share CEO/COO passwords in team channels. Abdullah and Hira passwords are
 | --- | --- | --- |
 | Areeba | SDR | `mmvoG1QT7cJH` |
 | Khadija | SDR | `8ibVDHQCCpSn` |
-| Mashael | SDR | `6KmaMylvbxeu` |
 | Muneeb | Onboarding | `f_gKB0KlzwER` |
 | Taiba | SDR | `Rg78L28W-GZE` |
 
@@ -580,4 +579,3 @@ If something looks wrong:
 5. Use `?reset=1` only if you intentionally want to wipe local preview data.
 6. Check Settings for role, password, KPI, attendance, and package setup.
 7. If live backend data is involved, verify the live API and environment variables.
-
