@@ -1,3 +1,8 @@
+// ---- STYLIQUE GTM PATCH (additive) — DO NOT OVERWRITE ----
+// Sections below this line: SDR users, fuzzyMatchLead, ingest* functions,
+// /api/ingest/* routes. Future Codex jobs MUST treat these as read-only
+// unless explicitly asked to modify them. See CRM_PATCH.md.
+// -----------------------------------------------------------
 import http from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -81,6 +86,56 @@ function detectCountry(row = {}) {
   if (/\.pk(\b|$|\/)/.test(hint)) return 'Pakistan';
   if (/\.ca(\b|$|\/)/.test(hint)) return 'Canada';
   return 'United States';
+}
+
+function emailDomain(email = '') {
+  return String(email || '').trim().toLowerCase().split('@')[1] || '';
+}
+
+function siteDomain(site = '') {
+  return String(site || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/.*$/, '');
+}
+
+function lastName(name = '') {
+  const parts = String(name || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+}
+
+function fuzzyMatchLead(leads, { email, linkedin, companyName, company, name, phone } = {}) {
+  const normalizedCompany = normalizeBrandName(companyName || company || '');
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedLinkedin = String(linkedin || '').trim().toLowerCase();
+  const normalizedPhone = String(phone || '').replace(/[^0-9+]/g, '');
+  const domain = emailDomain(normalizedEmail);
+  const surname = lastName(name);
+
+  return (Array.isArray(leads) ? leads : []).find(lead => {
+    const contacts = Array.isArray(lead.contacts) ? lead.contacts : [];
+    if (normalizedCompany && normalizeBrandName(lead.companyName) === normalizedCompany) return true;
+    if (normalizedEmail && String(lead.contactEmail || '').toLowerCase() === normalizedEmail) return true;
+    if (normalizedEmail && contacts.some(contact => String(contact.email || '').toLowerCase() === normalizedEmail)) return true;
+    if (normalizedLinkedin && contacts.some(contact => String(contact.linkedin || '').toLowerCase() === normalizedLinkedin)) return true;
+    if (normalizedPhone && contacts.some(contact => String(contact.phone || '').replace(/[^0-9+]/g, '') === normalizedPhone)) return true;
+    if (domain && siteDomain(lead.website || lead.domain || '') === domain) return true;
+    if (surname && domain && contacts.some(contact => lastName(contact.name) === surname && emailDomain(contact.email) === domain)) return true;
+    return false;
+  });
+}
+
+function appendLeadHistory(lead, actor, action, note) {
+  const history = Array.isArray(lead.history) ? lead.history : [];
+  history.push({
+    ts: new Date().toISOString(),
+    actor: actor || 'crm',
+    action,
+    note: note || '',
+  });
+  lead.history = history.slice(-250);
 }
 
 let graphTokenCache = { token: '', expiresAt: 0 };
@@ -312,7 +367,7 @@ async function ingestBookDemo(body, user) {
   const owner = String(body.owner || user.sub || '').trim() || 'abdullah';
   const leads = await readBucket('leads');
   const activities = await readBucket('activities');
-  const existing = leads.find(lead => normalizeBrandName(lead.companyName) === normalizeBrandName(companyName));
+  const existing = fuzzyMatchLead(leads, { companyName, email: contacts[0]?.email, linkedin: contacts[0]?.linkedin, name: contacts[0]?.name });
 
   if (existing) {
     const baseContacts = Array.isArray(existing.contacts) && existing.contacts.length
@@ -464,6 +519,7 @@ async function ingestOutboundLead(body, user) {
       source_detail: existing.source_detail || 'gtm_pipeline',
       updatedAt: now,
     });
+    appendLeadHistory(existing, user?.sub || 'gtm-pipeline', 'outbound-merged', `Outbound contact merged into ${companyName}`);
     activities.unshift({
       id: safeId('activity'),
       leadId: existing.id,
@@ -503,6 +559,7 @@ async function ingestOutboundLead(body, user) {
     priority: intentScore >= 4 ? 'high' : intentScore === 3 ? 'medium' : 'low',
     leadKey: normalizeBrandName(companyName),
   };
+  appendLeadHistory(lead, user?.sub || 'gtm-pipeline', 'outbound-created', `Outbound lead created — ${companyName}`);
   leads.push(lead);
   activities.unshift({
     id: safeId('activity'),
@@ -530,13 +587,7 @@ async function ingestReply(body, user) {
   const now = new Date().toISOString();
   const leads = await readBucket('leads');
   const activities = await readBucket('activities');
-  const lead = leads.find(item =>
-    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
-    (email && (String(item.contactEmail || '').toLowerCase() === email ||
-      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email)))) ||
-    (linkedin && Array.isArray(item.contacts) &&
-      item.contacts.some(contact => String(contact.linkedin || '').toLowerCase() === linkedin))
-  );
+  const lead = fuzzyMatchLead(leads, { email, linkedin, companyName });
   if (!lead) return { status: 404, body: { ok: false, error: 'No matching lead found for reply' } };
 
   const owner = lead.assigned_sdr || lead.assignedTo || 'abdullah';
@@ -561,6 +612,7 @@ async function ingestReply(body, user) {
       stageFamily: 'sdr',
     }],
   });
+  appendLeadHistory(lead, user?.sub || 'inbound-agent', 'reply-received', message ? `Reply (${channel}): ${message.slice(0, 240)}` : `Reply received via ${channel}`);
   activities.unshift({
     id: safeId('activity'),
     leadId: lead.id,
@@ -586,12 +638,7 @@ async function ingestAdvance(body, user) {
   const now = new Date().toISOString();
   const leads = await readBucket('leads');
   const activities = await readBucket('activities');
-  const lead = leads.find(item =>
-    (leadId && item.id === leadId) ||
-    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
-    (email && (String(item.contactEmail || '').toLowerCase() === email ||
-      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email))))
-  );
+  const lead = (leadId && leads.find(item => item.id === leadId)) || fuzzyMatchLead(leads, { email, companyName });
   if (!lead) return { status: 404, body: { ok: false, error: 'No matching lead found' } };
 
   const action = String(body.action || 'email').trim().toLowerCase();
@@ -617,6 +664,7 @@ async function ingestAdvance(body, user) {
   lead.last_action = action;
   lead.last_action_at = now;
   if (note) lead.notes = [lead.notes, `[${action}] ${note}`].filter(Boolean).join('\n');
+  appendLeadHistory(lead, user?.sub || 'claude-agent', action, note || subject || `Action: ${action} via ${channel}`);
   activities.unshift({
     id: safeId('activity'),
     leadId: lead.id,
@@ -650,9 +698,7 @@ async function ingestInboundList(body, user) {
     const country = detectCountry(row);
     const owner = sdrForTerritory(country);
     const phone = String(row.contactPhone || row.phone || '').trim() || undefined;
-    const existing = companyName
-      ? leads.find(lead => normalizeBrandName(lead.companyName) === normalizeBrandName(companyName))
-      : null;
+    const existing = fuzzyMatchLead(leads, { companyName, email: contactEmail, name: contactName, phone });
     if (existing) {
       const contacts = Array.isArray(existing.contacts) ? existing.contacts : [];
       if (!contactAlreadyExists(contacts, contactEmail, contactName)) {
@@ -660,6 +706,7 @@ async function ingestInboundList(body, user) {
         existing.contacts = contacts;
       }
       existing.updatedAt = now;
+      appendLeadHistory(existing, user?.sub || 'inbound-csv', 'inbound-merged', `Inbound CSV contact merged — ${companyName || contactEmail}`);
       merged++;
       continue;
     }
@@ -702,6 +749,7 @@ async function ingestInboundList(body, user) {
         stageFamily: 'sdr',
       }],
     };
+    appendLeadHistory(lead, user?.sub || 'inbound-csv', 'inbound-created', `Inbound CSV lead created — ${lead.companyName}`);
     leads.push(lead);
     created++;
     activities.unshift({
@@ -727,11 +775,7 @@ async function ingestBooking(body, user) {
   const now = new Date().toISOString();
   const leads = await readBucket('leads');
   const activities = await readBucket('activities');
-  let lead = leads.find(item =>
-    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
-    (email && (String(item.contactEmail || '').toLowerCase() === email ||
-      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email))))
-  );
+  let lead = fuzzyMatchLead(leads, { email, companyName });
   let createdNew = false;
   if (!lead) {
     lead = {
@@ -773,6 +817,7 @@ async function ingestBooking(body, user) {
       stageFamily: 'sdr',
     }],
   });
+  appendLeadHistory(lead, user?.sub || 'calendly', 'meeting-booked', `Meeting booked${when ? ' for ' + when : ''}${createdNew ? ' (new direct booking)' : ''}`);
   activities.unshift({
     id: safeId('activity'),
     leadId: lead.id,
@@ -801,13 +846,7 @@ async function ingestInboundEvent(body, user) {
   const now = new Date().toISOString();
   const leads = await readBucket('leads');
   const activities = await readBucket('activities');
-  let lead = leads.find(item =>
-    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
-    (email && (String(item.contactEmail || '').toLowerCase() === email ||
-      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email)))) ||
-    (linkedin && Array.isArray(item.contacts) &&
-      item.contacts.some(contact => String(contact.linkedin || '').toLowerCase() === linkedin))
-  );
+  let lead = fuzzyMatchLead(leads, { email, linkedin, companyName, name });
   let isNew = false;
   if (!lead) {
     const country = detectCountry(body);
@@ -860,6 +899,7 @@ async function ingestInboundEvent(body, user) {
       stageFamily: 'sdr',
     }],
   });
+  appendLeadHistory(lead, user?.sub || 'inbound-agent', 'inbound-event', message ? `Inbound ${source} (${channel}): ${message.slice(0, 240)}` : `Inbound ${source} via ${channel}`);
   activities.unshift({
     id: safeId('activity'),
     leadId: lead.id,
@@ -882,11 +922,7 @@ async function ingestMeetingRecap(body, user) {
   const now = new Date().toISOString();
   const leads = await readBucket('leads');
   const activities = await readBucket('activities');
-  const lead = leads.find(item =>
-    (companyName && normalizeBrandName(item.companyName) === normalizeBrandName(companyName)) ||
-    (email && (String(item.contactEmail || '').toLowerCase() === email ||
-      (Array.isArray(item.contacts) && item.contacts.some(contact => String(contact.email || '').toLowerCase() === email))))
-  );
+  const lead = fuzzyMatchLead(leads, { email, companyName });
   if (!lead) return { status: 404, body: { ok: false, error: 'No matching lead found' } };
 
   const owner = lead.assigned_sdr || lead.assignedTo || 'abdullah';
@@ -910,6 +946,7 @@ async function ingestMeetingRecap(body, user) {
       stageFamily: 'sdr',
     }],
   });
+  appendLeadHistory(lead, user?.sub || 'meeting-recap', 'meeting-recap', highlights ? highlights.slice(0, 300) : 'Meeting completed');
   activities.unshift({
     id: safeId('activity'),
     leadId: lead.id,
@@ -1380,6 +1417,13 @@ export async function router(req, res) {
   }
 
   if (pathname === '/api/ingest/inbound-csv' && req.method === 'POST') {
+    const role = String(user.role || '');
+    if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
+    const result = await ingestInboundList(await readBody(req), user);
+    return send(res, result.status, result.body, corsHeaders);
+  }
+
+  if (pathname === '/api/ingest/inbound-list' && req.method === 'POST') {
     const role = String(user.role || '');
     if (!['ceo', 'coo', 'sdr'].includes(role)) return send(res, 403, { ok: false, error: 'Forbidden' }, corsHeaders);
     const result = await ingestInboundList(await readBody(req), user);
